@@ -84,7 +84,7 @@ export interface EvaluationReport {
   id: string;
   flowId: string;
   flowName: string;
-  websiteName: string;
+  websiteName?: string;
   runDate: string;
   totalSteps: number;
   completedSteps: number;
