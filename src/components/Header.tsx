@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Activity, History, Settings, Zap } from "lucide-react";
+import { Activity, Zap, Layers } from "lucide-react";
 
 export default function Header() {
   return (
@@ -17,30 +17,27 @@ export default function Header() {
             </span>
           </Link>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Link
               href="/"
-              className="px-4 py-2 text-sm font-medium text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors"
+              className="px-4 py-2 text-sm font-medium text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-subtle)] rounded-lg transition-colors"
             >
               Dashboard
             </Link>
             <Link
               href="/quick-evaluate"
-              className="px-4 py-2 text-sm font-medium text-[var(--accent)] hover:text-[var(--foreground)] transition-colors flex items-center gap-2"
+              className="px-4 py-2 text-sm font-medium bg-[var(--accent-muted)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-[var(--background)] rounded-lg transition-colors flex items-center gap-2"
             >
               <Zap className="w-4 h-4" />
               Quick Evaluate
             </Link>
             <Link
-              href="/evaluate"
-              className="px-4 py-2 text-sm font-medium text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors flex items-center gap-2"
+              href="/flows/new"
+              className="px-4 py-2 text-sm font-medium text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-subtle)] rounded-lg transition-colors flex items-center gap-2"
             >
-              <History className="w-4 h-4" />
-              Custom Flows
+              <Layers className="w-4 h-4" />
+              Custom Flow
             </Link>
-            <button className="p-2 rounded-lg hover:bg-[var(--background-subtle)] text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-all">
-              <Settings className="w-5 h-5" />
-            </button>
           </div>
         </nav>
       </div>
