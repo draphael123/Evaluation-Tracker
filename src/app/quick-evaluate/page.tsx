@@ -29,6 +29,8 @@ interface EvaluationStep {
   formFields?: number;
   buttons?: number;
   error?: string;
+  selectedOption?: string;
+  filledFields?: number;
 }
 
 const viewportOptions = [
@@ -144,24 +146,40 @@ export default function QuickEvaluatePage() {
                   url: data.url,
                 },
               ]);
-            } else if (data.type === "step-complete") {
-              setSteps((prev) =>
-                prev.map((s) =>
-                  s.stepNumber === data.stepNumber
-                    ? {
-                        ...s,
-                        status: "completed",
-                        name: data.name,
-                        url: data.url,
-                        screenshot: data.screenshot,
-                        duration: data.duration,
-                        formFields: data.formFields,
-                        buttons: data.buttons,
-                      }
-                    : s
-                )
-              );
-            } else if (data.type === "step-error") {
+                        } else if (data.type === "step-complete") {
+                          setSteps((prev) =>
+                            prev.map((s) =>
+                              s.stepNumber === data.stepNumber
+                                ? {
+                                    ...s,
+                                    status: "completed",
+                                    name: data.name,
+                                    url: data.url,
+                                    screenshot: data.screenshot,
+                                    duration: data.duration,
+                                    formFields: data.formFields,
+                                    buttons: data.buttons,
+                                  }
+                                : s
+                            )
+                          );
+                        } else if (data.type === "step-interaction") {
+                          setSteps((prev) =>
+                            prev.map((s) =>
+                              s.stepNumber === data.stepNumber
+                                ? {
+                                    ...s,
+                                    selectedOption: data.selectedOption,
+                                    filledFields: data.filledFields,
+                                  }
+                                : s
+                            )
+                          );
+                        } else if (data.type === "option-selected") {
+                          setInfoMessages((prev) => [...prev.slice(-3), `✓ Selected: "${data.option}"`]);
+                        } else if (data.type === "form-filled") {
+                          setInfoMessages((prev) => [...prev.slice(-3), `✓ Filled ${data.filledFields} field(s)`]);
+                        } else if (data.type === "step-error") {
               setSteps((prev) =>
                 prev.map((s) =>
                   s.stepNumber === data.stepNumber
@@ -440,16 +458,26 @@ export default function QuickEvaluatePage() {
                         </div>
 
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm truncate">{step.name}</div>
-                          {step.url && (
-                            <div className="text-xs text-[var(--foreground-dim)] truncate">
-                              {step.url}
-                            </div>
-                          )}
-                          {step.error && (
-                            <div className="text-xs text-[var(--error)]">{step.error}</div>
-                          )}
-                        </div>
+                                          <div className="font-medium text-sm truncate">{step.name}</div>
+                                          {step.url && (
+                                            <div className="text-xs text-[var(--foreground-dim)] truncate">
+                                              {step.url}
+                                            </div>
+                                          )}
+                                          {step.selectedOption && (
+                                            <div className="text-xs text-[var(--accent)] mt-1 truncate">
+                                              → {step.selectedOption}
+                                            </div>
+                                          )}
+                                          {step.filledFields && step.filledFields > 0 && (
+                                            <div className="text-xs text-[var(--success)] truncate">
+                                              ✓ {step.filledFields} field(s) filled
+                                            </div>
+                                          )}
+                                          {step.error && (
+                                            <div className="text-xs text-[var(--error)]">{step.error}</div>
+                                          )}
+                                        </div>
 
                         {step.duration && (
                           <div className="flex items-center gap-1 text-xs text-[var(--foreground-muted)]">

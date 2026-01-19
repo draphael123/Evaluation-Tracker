@@ -45,9 +45,8 @@ export function getScreenshot(path: string): string | undefined {
   return screenshotsStore.get(path);
 }
 
-// Common button text patterns to look for (in order of priority)
+// Common button/link text patterns for navigation (in priority order)
 const NEXT_BUTTON_PATTERNS = [
-  // Primary actions
   "get started",
   "start",
   "begin",
@@ -57,26 +56,17 @@ const NEXT_BUTTON_PATTERNS = [
   "begin assessment",
   "take quiz",
   "start quiz",
-  // Navigation
   "next",
   "continue",
   "proceed",
-  "go",
-  "forward",
-  // Submission
   "submit",
   "send",
   "confirm",
   "done",
   "finish",
   "complete",
-  // Selection confirmations
-  "select",
-  "choose",
-  "pick",
   "tap here",
   "click here",
-  // Agreement
   "i agree",
   "accept",
   "okay",
@@ -85,7 +75,7 @@ const NEXT_BUTTON_PATTERNS = [
   "got it",
 ];
 
-// Patterns that indicate we should NOT click (final pages, errors, etc.)
+// Patterns indicating final/stop pages
 const STOP_PATTERNS = [
   "sign up",
   "create account",
@@ -100,13 +90,10 @@ const STOP_PATTERNS = [
   "add to cart",
   "schedule",
   "book appointment",
-  "call us",
-  "contact",
 ];
 
-// Default test data for auto-filling forms
+// Default test data for form filling
 const DEFAULT_TEST_DATA: Record<string, string> = {
-  // Names
   firstName: "Test",
   first_name: "Test",
   fname: "Test",
@@ -116,23 +103,17 @@ const DEFAULT_TEST_DATA: Record<string, string> = {
   name: "Test User",
   fullName: "Test User",
   full_name: "Test User",
-  
-  // Contact
   email: "test@example.com",
   phone: "5551234567",
   phoneNumber: "5551234567",
   phone_number: "5551234567",
   tel: "5551234567",
   mobile: "5551234567",
-  
-  // Demographics
   age: "35",
   dateOfBirth: "1989-06-15",
   dob: "1989-06-15",
   birthdate: "1989-06-15",
   birthday: "06/15/1989",
-  
-  // Location
   zip: "90210",
   zipCode: "90210",
   zip_code: "90210",
@@ -140,12 +121,8 @@ const DEFAULT_TEST_DATA: Record<string, string> = {
   postalCode: "90210",
   city: "Los Angeles",
   state: "California",
-  
-  // Physical
   height: "70",
   weight: "180",
-  
-  // Generic
   username: "testuser",
   password: "TestPass123!",
 };
@@ -157,6 +134,7 @@ export class AutoFlowEvaluator {
   private evaluationId: string;
   private startTime: number = 0;
   private visitedUrls: Set<string> = new Set();
+  private pageContentHashes: Set<string> = new Set();
   private useCloudBrowser: boolean = false;
 
   constructor(config: AutoEvalConfig) {
@@ -207,20 +185,27 @@ export class AutoFlowEvaluator {
         timeout: 30000,
       });
 
-      // Auto-navigate through the flow
+      // Main evaluation loop
       while (stepNumber < this.config.maxSteps) {
         stepNumber++;
         const stepStartTime = Date.now();
-        const currentUrl = this.page.url();
 
-        // Check if we've been here before (loop detection)
-        if (this.visitedUrls.has(currentUrl) && stepNumber > 1) {
+        // Wait for page to stabilize
+        await this.page.waitForTimeout(1500);
+        await this.waitForPageReady();
+
+        const currentUrl = this.page.url();
+        const pageHash = await this.getPageContentHash();
+
+        // Loop detection - check if we've seen this exact page state before
+        if (this.pageContentHashes.has(pageHash) && stepNumber > 2) {
           onProgress({
             type: "info",
-            message: "Detected page loop, stopping evaluation",
+            message: "Detected page loop (same content), stopping evaluation",
           });
           break;
         }
+        this.pageContentHashes.add(pageHash);
         this.visitedUrls.add(currentUrl);
 
         onProgress({
@@ -230,21 +215,16 @@ export class AutoFlowEvaluator {
           url: currentUrl,
         });
 
-        // Wait for page to stabilize
-        await this.page.waitForTimeout(1000);
-        await this.waitForPageReady();
-
-        // Collect page data
+        // Collect page data BEFORE any interaction
         const pageData = await this.collectPageData();
         const pageTitle = await this.page.title();
         const h1 = await this.getH1();
-
-        // Take screenshot
-        const screenshot = await this.takeScreenshot(stepNumber);
-
-        // Determine step name from page content
         const stepName = h1 || pageTitle || `Step ${stepNumber}`;
 
+        // Take screenshot of current state
+        const screenshot = await this.takeScreenshot(stepNumber);
+
+        // Create step result
         const stepResult: StepResult = {
           stepNumber,
           name: stepName,
@@ -272,7 +252,7 @@ export class AutoFlowEvaluator {
           buttons: pageData.buttons.length,
         });
 
-        // Check if we should stop (final page indicators)
+        // Check if we should stop
         if (await this.isEndOfFlow()) {
           onProgress({
             type: "info",
@@ -281,38 +261,61 @@ export class AutoFlowEvaluator {
           break;
         }
 
-        // Try to fill forms if enabled
+        // === INTERACTION PHASE ===
+        
+        // 1. First, try to select an option if this is a selection/quiz page
+        const selectedOption = await this.selectOptionOnPage();
+        if (selectedOption) {
+          onProgress({
+            type: "option-selected",
+            stepNumber,
+            option: selectedOption,
+          });
+          await this.page.waitForTimeout(800);
+        }
+
+        // 2. Fill any form fields
+        let filledCount = 0;
         if (this.config.autoFillForms) {
-          const filled = await this.autoFillForms();
-          if (filled > 0) {
+          filledCount = await this.autoFillForms();
+          if (filledCount > 0) {
             onProgress({
-              type: "info",
-              message: `Auto-filled ${filled} form field(s)`,
+              type: "form-filled",
+              stepNumber,
+              filledFields: filledCount,
             });
-            // Take another screenshot after filling
             await this.page.waitForTimeout(500);
           }
         }
 
-        // Try to click next/continue button
+        // Update step with interaction results
+        onProgress({
+          type: "step-interaction",
+          stepNumber,
+          selectedOption,
+          filledFields: filledCount,
+        });
+
+        // 3. Click next/continue/submit button
         const clicked = await this.clickNextButton();
-        if (!clicked) {
+        if (clicked) {
           onProgress({
             type: "info",
-            message: "No actionable button found, stopping evaluation",
+            message: "Clicked next/continue button",
           });
-          break;
+        } else {
+          // If no next button, maybe selecting an option auto-advances
+          if (!selectedOption) {
+            onProgress({
+              type: "info",
+              message: "No actionable button or option found, stopping evaluation",
+            });
+            break;
+          }
         }
 
-        // Wait for navigation or page update
+        // Wait for page transition
         await this.page.waitForTimeout(2000);
-        
-        // Check if URL changed or page content updated significantly
-        const newUrl = this.page.url();
-        if (newUrl === currentUrl) {
-          // URL didn't change, check if page content changed
-          await this.page.waitForTimeout(1000);
-        }
       }
 
       if (stepNumber >= this.config.maxSteps) {
@@ -326,7 +329,6 @@ export class AutoFlowEvaluator {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       onProgress({ type: "error", message: errorMessage });
 
-      // Add error step
       steps.push({
         stepNumber: stepNumber + 1,
         name: "Error",
@@ -367,7 +369,7 @@ export class AutoFlowEvaluator {
     // Store report
     reportsStore.set(this.evaluationId, report);
 
-    // Try filesystem storage for local dev
+    // Try filesystem for local dev
     if (!isServerless) {
       try {
         const fs = await import("fs");
@@ -396,55 +398,178 @@ export class AutoFlowEvaluator {
     return report;
   }
 
+  // Get a hash of the page content to detect loops
+  private async getPageContentHash(): Promise<string> {
+    if (!this.page) return "";
+    try {
+      const content = await this.page.evaluate(() => {
+        // Get main content area text + URL + form state
+        const h1 = document.querySelector("h1")?.textContent || "";
+        const h2 = document.querySelector("h2")?.textContent || "";
+        const buttons = Array.from(document.querySelectorAll("button")).map(b => b.textContent).join(",");
+        return `${window.location.pathname}|${h1}|${h2}|${buttons}`;
+      });
+      return content;
+    } catch {
+      return this.page.url();
+    }
+  }
+
   private async waitForPageReady(): Promise<void> {
     if (!this.page) return;
-    
     try {
-      // Wait for network to be mostly idle
       await this.page.waitForLoadState("domcontentloaded", { timeout: 10000 });
-      
-      // Wait a bit for JavaScript to settle
       await this.page.waitForTimeout(500);
     } catch {
-      // Continue even if timeout
+      // Continue
     }
   }
 
   private async isEndOfFlow(): Promise<boolean> {
     if (!this.page) return true;
 
-    // Check for common end-of-flow indicators
-    const pageText = await this.page.textContent("body") || "";
-    const lowerText = pageText.toLowerCase();
-
-    // Check for stop patterns
+    // Check for stop buttons
     for (const pattern of STOP_PATTERNS) {
-      // Look for buttons/links with these texts
-      const hasStopButton = await this.page.$(`button:has-text("${pattern}"), a:has-text("${pattern}")`);
-      if (hasStopButton) {
-        return true;
+      try {
+        const hasStopElement = await this.page.$(`button:has-text("${pattern}"), a:has-text("${pattern}")`);
+        if (hasStopElement) {
+          const isVisible = await hasStopElement.isVisible();
+          if (isVisible) return true;
+        }
+      } catch {
+        // Continue
       }
     }
 
-    // Check for thank you / confirmation pages
-    const thankYouPatterns = [
+    // Check for thank you / confirmation content
+    const pageText = (await this.page.textContent("body") || "").toLowerCase();
+    const endPatterns = [
       "thank you",
       "thanks for",
       "we'll be in touch",
       "we will contact",
       "check your email",
-      "confirmation",
       "your results",
       "assessment complete",
+      "evaluation complete",
+      "you're all set",
+      "all done",
     ];
 
-    for (const pattern of thankYouPatterns) {
-      if (lowerText.includes(pattern)) {
-        return true;
-      }
+    for (const pattern of endPatterns) {
+      if (pageText.includes(pattern)) return true;
     }
 
     return false;
+  }
+
+  // Select an option on quiz/selection pages
+  private async selectOptionOnPage(): Promise<string | null> {
+    if (!this.page) return null;
+
+    // Common selectors for clickable options in questionnaires
+    const optionSelectors = [
+      // Radio/checkbox labels
+      'label:has(input[type="radio"])',
+      'label:has(input[type="checkbox"])',
+      // Clickable option cards/divs (common in modern forms)
+      '[role="option"]',
+      '[role="radio"]',
+      '[role="checkbox"]',
+      '[data-option]',
+      '[data-value]',
+      '[data-answer]',
+      // Common class patterns for option cards
+      '.option-card',
+      '.answer-option',
+      '.choice-card',
+      '.selection-item',
+      '.quiz-option',
+      '.question-option',
+      // Clickable list items that look like options
+      'li[class*="option"]',
+      'li[class*="choice"]',
+      'div[class*="option"]:not(button)',
+      'div[class*="choice"]:not(button)',
+      // Buttons that are clearly options (not navigation)
+      'button[class*="option"]',
+      'button[class*="choice"]',
+      'button[class*="answer"]',
+    ];
+
+    for (const selector of optionSelectors) {
+      try {
+        const options = await this.page.$$(selector);
+        
+        for (const option of options) {
+          try {
+            const isVisible = await option.isVisible();
+            if (!isVisible) continue;
+
+            // Check if already selected
+            const isSelected = await option.evaluate((el) => {
+              const input = el.querySelector('input[type="radio"], input[type="checkbox"]');
+              if (input) return (input as HTMLInputElement).checked;
+              return el.classList.contains('selected') || 
+                     el.classList.contains('active') ||
+                     el.getAttribute('aria-selected') === 'true' ||
+                     el.getAttribute('data-selected') === 'true';
+            });
+
+            if (isSelected) continue;
+
+            // Get the option text
+            const optionText = (await option.textContent() || "").trim();
+            
+            // Skip if it looks like a navigation button
+            const lowerText = optionText.toLowerCase();
+            const isNavButton = NEXT_BUTTON_PATTERNS.some(p => lowerText === p) ||
+                               STOP_PATTERNS.some(p => lowerText.includes(p));
+            
+            if (isNavButton || optionText.length > 100 || optionText.length < 1) continue;
+
+            // Click the option
+            await option.click();
+            return optionText.substring(0, 50); // Return truncated option text
+          } catch {
+            // Continue to next option
+          }
+        }
+      } catch {
+        // Continue to next selector
+      }
+    }
+
+    // Fallback: try to find and click unchecked radio buttons or checkboxes directly
+    try {
+      const uncheckedInputs = await this.page.$$('input[type="radio"]:not(:checked), input[type="checkbox"]:not(:checked)');
+      for (const input of uncheckedInputs) {
+        try {
+          const isVisible = await input.isVisible();
+          if (isVisible) {
+            // Try clicking the associated label first
+            const id = await input.getAttribute('id');
+            if (id) {
+              const label = await this.page.$(`label[for="${id}"]`);
+              if (label) {
+                const labelText = await label.textContent();
+                await label.click();
+                return labelText?.trim().substring(0, 50) || "Option selected";
+              }
+            }
+            // Fallback to clicking input directly
+            await input.click();
+            return "Option selected";
+          }
+        } catch {
+          // Continue
+        }
+      }
+    } catch {
+      // Ignore
+    }
+
+    return null;
   }
 
   private async clickNextButton(): Promise<boolean> {
@@ -453,8 +578,7 @@ export class AutoFlowEvaluator {
     // Try each button pattern
     for (const pattern of NEXT_BUTTON_PATTERNS) {
       try {
-        // Try button elements
-        const buttonSelectors = [
+        const selectors = [
           `button:has-text("${pattern}")`,
           `a:has-text("${pattern}")`,
           `[role="button"]:has-text("${pattern}")`,
@@ -462,75 +586,65 @@ export class AutoFlowEvaluator {
           `input[type="button"][value*="${pattern}" i]`,
         ];
 
-        for (const selector of buttonSelectors) {
-          const element = await this.page.$(selector);
-          if (element) {
-            const isVisible = await element.isVisible();
-            const isEnabled = await element.isEnabled();
-            
-            if (isVisible && isEnabled) {
-              // Check it's not a stop pattern
-              const text = (await element.textContent() || "").toLowerCase();
-              const isStopButton = STOP_PATTERNS.some((sp) => text.includes(sp));
-              
-              if (!isStopButton) {
-                await element.click();
-                return true;
+        for (const selector of selectors) {
+          try {
+            const element = await this.page.$(selector);
+            if (element) {
+              const isVisible = await element.isVisible();
+              const isEnabled = await element.isEnabled();
+
+              if (isVisible && isEnabled) {
+                const text = (await element.textContent() || "").toLowerCase();
+                const isStopButton = STOP_PATTERNS.some((sp) => text.includes(sp));
+
+                if (!isStopButton) {
+                  await element.click();
+                  return true;
+                }
               }
             }
+          } catch {
+            // Continue
           }
         }
       } catch {
-        // Continue to next pattern
+        // Continue
       }
     }
 
-    // Fallback: try to find any prominent button
-    try {
-      const fallbackSelectors = [
-        'button[type="submit"]',
-        'input[type="submit"]',
-        'button.primary',
-        'button.btn-primary',
-        'a.btn-primary',
-        'button.cta',
-        'a.cta',
-      ];
+    // Fallback: generic submit/primary buttons
+    const fallbackSelectors = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button.primary',
+      'button.btn-primary',
+      'a.btn-primary',
+      'button.cta',
+      'a.cta',
+      'button[class*="next"]',
+      'button[class*="continue"]',
+      'button[class*="submit"]',
+      'a[class*="next"]',
+      'a[class*="continue"]',
+    ];
 
-      for (const selector of fallbackSelectors) {
+    for (const selector of fallbackSelectors) {
+      try {
         const element = await this.page.$(selector);
         if (element) {
           const isVisible = await element.isVisible();
           const isEnabled = await element.isEnabled();
           const text = (await element.textContent() || "").toLowerCase();
-          
-          // Make sure it's not a stop button
           const isStopButton = STOP_PATTERNS.some((sp) => text.includes(sp));
-          
+
           if (isVisible && isEnabled && !isStopButton) {
             await element.click();
             return true;
           }
         }
+      } catch {
+        // Continue
       }
-    } catch {
-      // Ignore
-    }
-
-    // Last resort: try clicking any visible radio button or checkbox (for selection pages)
-    try {
-      const radioOrCheck = await this.page.$('input[type="radio"]:not(:checked), input[type="checkbox"]:not(:checked)');
-      if (radioOrCheck) {
-        const isVisible = await radioOrCheck.isVisible();
-        if (isVisible) {
-          await radioOrCheck.click();
-          await this.page.waitForTimeout(500);
-          // After selecting, try to find a submit button again
-          return await this.clickNextButton();
-        }
-      }
-    } catch {
-      // Ignore
     }
 
     return false;
@@ -543,37 +657,38 @@ export class AutoFlowEvaluator {
     const testData = { ...DEFAULT_TEST_DATA, ...this.config.testData };
 
     try {
-      // Get all input fields
-      const inputs = await this.page.$$('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="radio"]):not([type="checkbox"]), textarea, select');
+      // Get all fillable inputs
+      const inputs = await this.page.$$(
+        'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="radio"]):not([type="checkbox"]), textarea'
+      );
 
       for (const input of inputs) {
         try {
           const isVisible = await input.isVisible();
           if (!isVisible) continue;
 
-          const tagName = await input.evaluate((el) => el.tagName.toLowerCase());
-          const type = await input.getAttribute("type") || "text";
-          const name = await input.getAttribute("name") || "";
-          const id = await input.getAttribute("id") || "";
-          const placeholder = await input.getAttribute("placeholder") || "";
+          const type = (await input.getAttribute("type")) || "text";
+          const name = (await input.getAttribute("name")) || "";
+          const id = (await input.getAttribute("id")) || "";
+          const placeholder = (await input.getAttribute("placeholder")) || "";
           const currentValue = await input.inputValue().catch(() => "");
 
-          // Skip if already filled
+          // Skip if already has value
           if (currentValue && currentValue.length > 0) continue;
 
           // Find matching test data
           let value = "";
-          const identifier = (name || id || placeholder).toLowerCase();
+          const identifier = (name + id + placeholder).toLowerCase();
 
-          // Try exact matches first
+          // Match by identifier
           for (const [key, val] of Object.entries(testData)) {
-            if (identifier.includes(key.toLowerCase()) || key.toLowerCase().includes(identifier)) {
+            if (identifier.includes(key.toLowerCase())) {
               value = val;
               break;
             }
           }
 
-          // Fallback based on input type
+          // Fallback by input type
           if (!value) {
             if (type === "email" || identifier.includes("email")) {
               value = testData.email;
@@ -583,38 +698,57 @@ export class AutoFlowEvaluator {
               value = testData.dateOfBirth;
             } else if (identifier.includes("zip") || identifier.includes("postal")) {
               value = testData.zip;
+            } else if (identifier.includes("first") && identifier.includes("name")) {
+              value = testData.firstName;
+            } else if (identifier.includes("last") && identifier.includes("name")) {
+              value = testData.lastName;
             } else if (identifier.includes("name")) {
-              if (identifier.includes("first")) {
-                value = testData.firstName;
-              } else if (identifier.includes("last")) {
-                value = testData.lastName;
-              } else {
-                value = testData.name;
-              }
+              value = testData.name;
+            } else if (identifier.includes("city")) {
+              value = testData.city;
+            } else if (identifier.includes("state")) {
+              value = testData.state;
+            } else if (identifier.includes("age")) {
+              value = testData.age;
+            } else if (identifier.includes("height")) {
+              value = testData.height;
+            } else if (identifier.includes("weight")) {
+              value = testData.weight;
             }
           }
 
-          if (value && tagName !== "select") {
+          if (value) {
             await input.fill(value);
             filledCount++;
-          } else if (tagName === "select") {
-            // For select, try to pick the first non-empty option
-            const options = await input.$$("option");
-            if (options.length > 1) {
-              const secondOption = options[1];
-              const optionValue = await secondOption.getAttribute("value");
-              if (optionValue) {
-                await input.selectOption(optionValue);
-                filledCount++;
-              }
+          }
+        } catch {
+          // Continue
+        }
+      }
+
+      // Handle select dropdowns
+      const selects = await this.page.$$("select");
+      for (const select of selects) {
+        try {
+          const isVisible = await select.isVisible();
+          if (!isVisible) continue;
+
+          // Select first non-empty option
+          const options = await select.$$("option");
+          if (options.length > 1) {
+            const secondOption = options[1];
+            const optionValue = await secondOption.getAttribute("value");
+            if (optionValue) {
+              await select.selectOption(optionValue);
+              filledCount++;
             }
           }
         } catch {
-          // Continue to next input
+          // Continue
         }
       }
     } catch {
-      // Ignore form filling errors
+      // Ignore
     }
 
     return filledCount;
@@ -669,7 +803,7 @@ export class AutoFlowEvaluator {
     const screenshotKey = `/screenshots/${this.evaluationId}/step-${stepNumber}.png`;
     screenshotsStore.set(screenshotKey, dataUrl);
 
-    // Also save to filesystem if available
+    // Save to filesystem if available
     if (!isServerless) {
       try {
         const fs = await import("fs");
@@ -704,4 +838,3 @@ export async function runAutoEvaluation(
   const evaluator = new AutoFlowEvaluator(config);
   return evaluator.run(onProgress);
 }
-
