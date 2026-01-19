@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import Header from "@/components/Header";
-import FlowCard from "@/components/FlowCard";
 import FeatureCard from "@/components/FeatureCard";
 import StepIndicator from "@/components/StepIndicator";
 import RecentEvaluations, { EvaluationRun } from "@/components/RecentEvaluations";
+import { DynamicFlow } from "@/lib/types";
 import {
   Play,
   Camera,
@@ -17,28 +18,33 @@ import {
   Sparkles,
   Eye,
   Zap,
-  Users,
-  Heart,
+  Plus,
+  ArrowRight,
+  Globe,
+  Edit3,
+  Trash2,
+  MoreVertical,
+  Loader2,
 } from "lucide-react";
 
 const howItWorksSteps = [
   {
     number: 1,
-    title: "Configure",
+    title: "Create Flow",
     description:
-      "Select which flow to evaluate — Men's TRT, Women's HRT, or other patient journeys.",
+      "Define your evaluation flow with our visual builder — no coding required.",
     icon: <Settings2 className="w-7 h-7" />,
   },
   {
     number: 2,
-    title: "Run",
+    title: "Run Evaluation",
     description:
-      "The tool automatically navigates through the evaluation, capturing screenshots and data at each step.",
+      "The tool automatically navigates through the flow, capturing screenshots and data.",
     icon: <Play className="w-7 h-7" />,
   },
   {
     number: 3,
-    title: "Review",
+    title: "Review Report",
     description:
       "View a visual report with screenshots, metadata, and any detected issues.",
     icon: <Eye className="w-7 h-7" />,
@@ -50,7 +56,7 @@ const features = [
     icon: <Camera className="w-5 h-5" />,
     title: "Screenshot Capture",
     description:
-      "Automatic full-page screenshots at every step of the patient journey.",
+      "Automatic full-page screenshots at every step of any user journey.",
   },
   {
     icon: <FileJson className="w-5 h-5" />,
@@ -60,9 +66,9 @@ const features = [
   },
   {
     icon: <Sparkles className="w-5 h-5" />,
-    title: "Visual Reports",
+    title: "Visual Flow Builder",
     description:
-      "Step-by-step visual reports with timeline view and summary stats.",
+      "Create evaluation flows for any website using our no-code visual builder.",
   },
   {
     icon: <AlertTriangle className="w-5 h-5" />,
@@ -86,19 +92,35 @@ const features = [
 
 export default function Home() {
   const router = useRouter();
+  const [flows, setFlows] = useState<DynamicFlow[]>([]);
   const [evaluations, setEvaluations] = useState<EvaluationRun[]>([]);
+  const [isLoadingFlows, setIsLoadingFlows] = useState(true);
   const [isLoadingReports, setIsLoadingReports] = useState(true);
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
   useEffect(() => {
+    const fetchFlows = async () => {
+      try {
+        const response = await fetch("/api/flows");
+        if (response.ok) {
+          const data = await response.json();
+          setFlows(data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch flows:", error);
+      } finally {
+        setIsLoadingFlows(false);
+      }
+    };
+
     const fetchReports = async () => {
       try {
         const response = await fetch("/api/get-reports");
         if (response.ok) {
           const data = await response.json();
-          // Transform API data to match EvaluationRun interface
           const transformed: EvaluationRun[] = data.slice(0, 5).map((report: any) => ({
             id: report.id,
-            flowType: report.flowType,
+            flowType: report.flowId || report.flowType,
             flowName: report.flowName,
             startedAt: report.runDate,
             status: report.status === "partial" ? "failed" : report.status,
@@ -115,11 +137,22 @@ export default function Home() {
       }
     };
 
+    fetchFlows();
     fetchReports();
   }, []);
 
-  const handleFlowSelect = (flowType: string) => {
-    router.push(`/evaluate?flow=${flowType}`);
+  const handleDeleteFlow = async (flowId: string) => {
+    if (!confirm("Are you sure you want to delete this flow?")) return;
+
+    try {
+      const response = await fetch(`/api/flows/${flowId}`, { method: "DELETE" });
+      if (response.ok) {
+        setFlows(flows.filter((f) => f.id !== flowId));
+      }
+    } catch (error) {
+      console.error("Failed to delete flow:", error);
+    }
+    setActiveMenu(null);
   };
 
   return (
@@ -128,7 +161,6 @@ export default function Home() {
 
       {/* Hero Section */}
       <section className="relative pt-32 pb-20 overflow-hidden">
-        {/* Background gradient */}
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
@@ -136,8 +168,6 @@ export default function Home() {
               "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(45, 212, 191, 0.15), transparent)",
           }}
         />
-
-        {/* Grid pattern overlay */}
         <div
           className="absolute inset-0 pointer-events-none opacity-[0.02]"
           style={{
@@ -151,30 +181,32 @@ export default function Home() {
           <div className="max-w-3xl mx-auto text-center">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--accent-muted)] text-[var(--accent)] text-sm font-medium mb-6 animate-fade-in-up">
               <Sparkles className="w-4 h-4" />
-              Internal Tool v1.0
+              Works with any website
             </div>
 
             <h1 className="text-5xl md:text-6xl font-bold tracking-tight mb-6 animate-fade-in-up-delay-1">
-              Fountain{" "}
+              Universal{" "}
               <span className="gradient-text">Flow Evaluator</span>
             </h1>
 
             <p className="text-xl text-[var(--foreground-muted)] mb-10 leading-relaxed animate-fade-in-up-delay-2">
-              Monitor and document the TRT/HRT patient evaluation experience.
-              Automatically capture screenshots, collect data, and generate
-              visual reports.
+              Monitor and document any website&apos;s user flows. Create custom evaluations
+              with our visual builder — no coding required.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-fade-in-up-delay-3">
-              <button
-                onClick={() => router.push("/evaluate")}
+              <Link
+                href="/flows/new"
                 className="group px-8 py-4 rounded-xl bg-gradient-to-r from-[var(--accent)] to-[#38bdf8] text-[var(--background)] font-semibold text-lg shadow-lg shadow-[var(--accent-glow)] hover:shadow-xl hover:shadow-[var(--accent-glow)] hover:scale-[1.02] transition-all duration-300 flex items-center gap-2"
               >
-                <Play className="w-5 h-5" />
-                Run New Evaluation
-              </button>
-              <button className="px-8 py-4 rounded-xl glass text-[var(--foreground)] font-medium hover:border-[var(--accent)] transition-all duration-300">
-                View Documentation
+                <Plus className="w-5 h-5" />
+                Create New Flow
+              </Link>
+              <button
+                onClick={() => document.getElementById("flows-section")?.scrollIntoView({ behavior: "smooth" })}
+                className="px-8 py-4 rounded-xl glass text-[var(--foreground)] font-medium hover:border-[var(--accent)] transition-all duration-300"
+              >
+                View Existing Flows
               </button>
             </div>
           </div>
@@ -185,14 +217,11 @@ export default function Home() {
       <section className="py-20 relative">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              How It Works
-            </h2>
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">How It Works</h2>
             <p className="text-[var(--foreground-muted)] max-w-2xl mx-auto">
-              A simple three-step process to evaluate and document patient flows
+              A simple three-step process to evaluate any website flow
             </p>
           </div>
-
           <StepIndicator steps={howItWorksSteps} />
         </div>
       </section>
@@ -201,15 +230,11 @@ export default function Home() {
       <section className="py-20 bg-[var(--background-elevated)]">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              Powerful Features
-            </h2>
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">Powerful Features</h2>
             <p className="text-[var(--foreground-muted)] max-w-2xl mx-auto">
-              Everything you need to monitor and document patient evaluation
-              flows
+              Everything you need to monitor and document any user flow
             </p>
           </div>
-
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {features.map((feature, index) => (
               <FeatureCard
@@ -223,44 +248,129 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Flow Selection Section */}
-      <section className="py-20">
+      {/* Your Flows Section */}
+      <section id="flows-section" className="py-20">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              Select a Flow to Evaluate
-            </h2>
-            <p className="text-[var(--foreground-muted)] max-w-2xl mx-auto">
-              Choose which patient journey you want to monitor and document
-            </p>
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h2 className="text-3xl font-bold mb-2">Your Flows</h2>
+              <p className="text-[var(--foreground-muted)]">
+                Create and manage evaluation flows for any website
+              </p>
+            </div>
+            <Link
+              href="/flows/new"
+              className="px-4 py-2 rounded-lg bg-[var(--accent)] text-[var(--background)] font-medium flex items-center gap-2 hover:opacity-90 transition-opacity"
+            >
+              <Plus className="w-4 h-4" />
+              New Flow
+            </Link>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-            <FlowCard
-              title="Men's TRT Evaluation"
-              description="Testosterone Replacement Therapy evaluation flow for male patients including symptom assessment, health history, and treatment eligibility."
-              flowType="mens-trt"
-              icon={<Users className="w-6 h-6" />}
-              stats={{
-                lastRun: "30 min ago",
-                totalRuns: 24,
-                successRate: 95,
-              }}
-              onSelect={handleFlowSelect}
-            />
-            <FlowCard
-              title="Women's HRT Evaluation"
-              description="Hormone Replacement Therapy evaluation flow for female patients covering menopause symptoms, hormone levels, and treatment options."
-              flowType="womens-hrt"
-              icon={<Heart className="w-6 h-6" />}
-              stats={{
-                lastRun: "2 hours ago",
-                totalRuns: 18,
-                successRate: 100,
-              }}
-              onSelect={handleFlowSelect}
-            />
-          </div>
+          {isLoadingFlows ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-8 h-8 animate-spin text-[var(--accent)]" />
+            </div>
+          ) : flows.length === 0 ? (
+            <div className="glass rounded-2xl p-12 text-center">
+              <div className="w-16 h-16 rounded-full bg-[var(--background-subtle)] flex items-center justify-center mx-auto mb-4">
+                <Globe className="w-8 h-8 text-[var(--foreground-dim)]" />
+              </div>
+              <h3 className="text-lg font-medium mb-2">No flows yet</h3>
+              <p className="text-sm text-[var(--foreground-muted)] mb-6 max-w-md mx-auto">
+                Create your first evaluation flow to start monitoring any website&apos;s user journey.
+              </p>
+              <Link
+                href="/flows/new"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--accent)] text-[var(--background)] font-medium hover:opacity-90 transition-opacity"
+              >
+                <Plus className="w-5 h-5" />
+                Create Your First Flow
+              </Link>
+            </div>
+          ) : (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {flows.map((flow) => (
+                <div
+                  key={flow.id}
+                  className="group relative glass rounded-2xl p-6 hover:border-[var(--accent)] transition-all duration-300"
+                >
+                  {/* Menu Button */}
+                  <div className="absolute top-4 right-4">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveMenu(activeMenu === flow.id ? null : flow.id);
+                      }}
+                      className="p-2 rounded-lg hover:bg-[var(--background-subtle)] text-[var(--foreground-muted)] opacity-0 group-hover:opacity-100 transition-all"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                    {activeMenu === flow.id && (
+                      <div className="absolute right-0 top-10 w-40 py-1 rounded-lg glass border border-[var(--border)] shadow-xl z-10">
+                        <Link
+                          href={`/flows/${flow.id}/edit`}
+                          className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-[var(--background-subtle)] transition-colors"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                          Edit Flow
+                        </Link>
+                        <button
+                          onClick={() => handleDeleteFlow(flow.id)}
+                          className="flex items-center gap-2 px-4 py-2 text-sm text-[var(--error)] hover:bg-[var(--error)]/10 transition-colors w-full"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-start gap-4 mb-4">
+                    <div className="w-12 h-12 rounded-xl bg-[var(--background-subtle)] flex items-center justify-center text-2xl">
+                      {flow.iconEmoji || "🌐"}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold truncate">{flow.name}</h3>
+                      <p className="text-sm text-[var(--foreground-muted)] truncate">
+                        {flow.websiteName || new URL(flow.websiteUrl).hostname}
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="text-sm text-[var(--foreground-muted)] mb-4 line-clamp-2">
+                    {flow.description || `${flow.steps.length} steps defined`}
+                  </p>
+
+                  <div className="flex items-center justify-between pt-4 border-t border-[var(--border)]">
+                    <span className="text-xs text-[var(--foreground-dim)]">
+                      {flow.steps.length} steps
+                    </span>
+                    <Link
+                      href={`/evaluate?flow=${flow.id}`}
+                      className="inline-flex items-center gap-1 text-sm text-[var(--accent)] hover:underline"
+                    >
+                      Run Evaluation
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
+                </div>
+              ))}
+
+              {/* Add New Flow Card */}
+              <Link
+                href="/flows/new"
+                className="group glass rounded-2xl p-6 border-dashed border-2 border-[var(--border)] hover:border-[var(--accent)] transition-all duration-300 flex flex-col items-center justify-center min-h-[200px]"
+              >
+                <div className="w-12 h-12 rounded-full bg-[var(--accent-muted)] flex items-center justify-center text-[var(--accent)] group-hover:bg-[var(--accent)] group-hover:text-[var(--background)] transition-colors mb-3">
+                  <Plus className="w-6 h-6" />
+                </div>
+                <span className="text-sm font-medium text-[var(--foreground-muted)] group-hover:text-[var(--foreground)]">
+                  Add New Flow
+                </span>
+              </Link>
+            </div>
+          )}
         </div>
       </section>
 
@@ -278,7 +388,6 @@ export default function Home() {
               View All
             </button>
           </div>
-
           <RecentEvaluations evaluations={evaluations} />
         </div>
       </section>
@@ -288,7 +397,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="text-sm text-[var(--foreground-dim)]">
-              Fountain Flow Evaluator — Internal Tool
+              Universal Flow Evaluator — Works with any website
             </div>
             <div className="text-sm text-[var(--foreground-dim)]">
               Built with Next.js + Playwright

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { runEvaluation } from "@/lib/evaluator";
+import { runDynamicEvaluation } from "@/lib/dynamicEvaluator";
+import { getFlowById } from "@/lib/flowStorage";
 import { FlowConfig } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -7,14 +8,32 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   try {
-    const config: FlowConfig = await request.json();
+    const body = await request.json();
+    const { flowId, ...configRest } = body;
+    
+    // Get the flow definition
+    const flow = getFlowById(flowId);
+    
+    if (!flow) {
+      return new Response(
+        JSON.stringify({ type: "error", message: "Flow not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    
+    const config: FlowConfig = {
+      flowId,
+      fillTestData: configRest.fillTestData || false,
+      screenshotMode: configRest.screenshotMode || "viewport",
+      viewport: configRest.viewport || "desktop",
+      testData: configRest.testData || {},
+    };
 
-    // Create a readable stream for progress updates
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          await runEvaluation(config, (data) => {
+          await runDynamicEvaluation(config, flow, (data) => {
             const json = JSON.stringify(data) + "\n";
             controller.enqueue(encoder.encode(json));
           });
@@ -47,4 +66,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

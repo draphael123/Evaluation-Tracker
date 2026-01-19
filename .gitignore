@@ -51,3 +51,7 @@ public/reports/*
 Thumbs.db
 
 .vercel
+
+# Keep data directories but not contents
+data/flows/*
+!data/flows/.gitkeep

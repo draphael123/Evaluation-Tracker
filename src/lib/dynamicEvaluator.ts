@@ -4,45 +4,36 @@ import * as fs from "fs";
 import * as path from "path";
 import {
   FlowConfig,
-  FlowDefinition,
+  DynamicFlow,
   StepResult,
   EvaluationReport,
   FormField,
   viewportSizes,
+  StepAction,
 } from "./types";
-import { getFlow } from "./flows";
 
 export interface StreamCallback {
-  (data: {
-    type: string;
-    [key: string]: any;
-  }): void;
+  (data: { type: string; [key: string]: any }): void;
 }
 
-export class FlowEvaluator {
+export class DynamicFlowEvaluator {
   private browser: Browser | null = null;
   private page: Page | null = null;
   private config: FlowConfig;
-  private flow: FlowDefinition;
+  private flow: DynamicFlow;
   private evaluationId: string;
   private screenshotsDir: string;
   private reportsDir: string;
   private startTime: number = 0;
 
-  constructor(config: FlowConfig) {
+  constructor(config: FlowConfig, flow: DynamicFlow) {
     this.config = config;
-    const flow = getFlow(config.flowType);
-    if (!flow) {
-      throw new Error(`Unknown flow type: ${config.flowType}`);
-    }
     this.flow = flow;
     this.evaluationId = uuidv4();
-    
-    // Set up directories
+
     this.screenshotsDir = path.join(process.cwd(), "public", "screenshots", this.evaluationId);
     this.reportsDir = path.join(process.cwd(), "public", "reports");
-    
-    // Ensure directories exist
+
     if (!fs.existsSync(this.screenshotsDir)) {
       fs.mkdirSync(this.screenshotsDir, { recursive: true });
     }
@@ -57,20 +48,16 @@ export class FlowEvaluator {
     let completedSteps = 0;
     let failedSteps = 0;
 
-    // Send initialization data
     onProgress({
       type: "init",
       evaluationId: this.evaluationId,
-      flowType: this.flow.flowType,
-      flowName: this.flow.flowName,
+      flowId: this.flow.id,
+      flowName: this.flow.name,
       steps: this.flow.steps.map((s) => s.name),
     });
 
     try {
-      // Launch browser
-      this.browser = await chromium.launch({
-        headless: true,
-      });
+      this.browser = await chromium.launch({ headless: true });
 
       const viewport = viewportSizes[this.config.viewport];
       const context = await this.browser.newContext({
@@ -81,8 +68,8 @@ export class FlowEvaluator {
 
       this.page = await context.newPage();
 
-      // Navigate to start URL
-      await this.page.goto(this.flow.startUrl, {
+      // Navigate to the starting URL
+      await this.page.goto(this.flow.websiteUrl, {
         waitUntil: "domcontentloaded",
         timeout: 30000,
       });
@@ -100,33 +87,32 @@ export class FlowEvaluator {
         });
 
         try {
-          // Wait for expected element if specified
-          if (stepDef.waitFor) {
+          // Wait for selector if specified
+          if (stepDef.waitForSelector) {
             try {
-              await this.page.waitForSelector(stepDef.waitFor, { timeout: 10000 });
+              await this.page.waitForSelector(stepDef.waitForSelector, {
+                timeout: stepDef.waitTimeout || 10000,
+              });
             } catch {
               // Continue even if wait fails
             }
           }
 
+          // Execute all actions in this step
+          for (const action of stepDef.actions) {
+            await this.executeAction(action);
+          }
+
+          // Wait a bit for page to settle
+          await this.page.waitForTimeout(500);
+
           // Collect page data
           const pageData = await this.collectPageData(this.page);
 
-          // Take screenshot
-          const screenshotPath = await this.takeScreenshot(this.page, stepNumber);
-
-          // Execute step action if defined
-          if (stepDef.action) {
-            await stepDef.action(this.page, this.config);
-            // Wait for navigation or network activity
-            await this.page.waitForTimeout(1000);
-          }
-
-          // Validate if validator exists
-          const errors: string[] = [];
-          if (stepDef.validate) {
-            const validationErrors = await stepDef.validate(this.page);
-            errors.push(...validationErrors);
+          // Take screenshot if enabled (default true)
+          let screenshotPath = "";
+          if (stepDef.captureScreenshot !== false) {
+            screenshotPath = await this.takeScreenshot(this.page, stepNumber);
           }
 
           const stepEndTime = Date.now();
@@ -136,14 +122,14 @@ export class FlowEvaluator {
             stepNumber,
             name: stepDef.name,
             url: this.page.url(),
-            screenshot: `/screenshots/${this.evaluationId}/step-${stepNumber}.png`,
+            screenshot: screenshotPath ? `/screenshots/${this.evaluationId}/step-${stepNumber}.png` : "",
             pageTitle: pageData.title,
             h1: pageData.h1,
             formFields: pageData.formFields,
             buttons: pageData.buttons,
             loadTime: duration,
             timestamp: new Date().toISOString(),
-            errors,
+            errors: [],
           };
 
           steps.push(stepResult);
@@ -158,7 +144,6 @@ export class FlowEvaluator {
             duration,
           });
         } catch (error) {
-          failedSteps++;
           const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
           // Try to capture screenshot even on error
@@ -166,7 +151,7 @@ export class FlowEvaluator {
           try {
             screenshotPath = await this.takeScreenshot(this.page, stepNumber);
           } catch {
-            // Ignore screenshot error
+            // Ignore
           }
 
           const stepResult: StepResult = {
@@ -184,33 +169,43 @@ export class FlowEvaluator {
 
           steps.push(stepResult);
 
-          onProgress({
-            type: "step-error",
-            stepNumber,
-            name: stepDef.name,
-            error: errorMessage,
-          });
+          if (stepDef.continueOnError) {
+            completedSteps++;
+            onProgress({
+              type: "step-complete",
+              stepNumber,
+              name: stepDef.name,
+              url: stepResult.url,
+              screenshot: stepResult.screenshot,
+              duration: stepResult.loadTime,
+              warning: errorMessage,
+            });
+          } else {
+            failedSteps++;
+            onProgress({
+              type: "step-error",
+              stepNumber,
+              name: stepDef.name,
+              error: errorMessage,
+            });
+          }
         }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      onProgress({
-        type: "error",
-        message: errorMessage,
-      });
+      onProgress({ type: "error", message: errorMessage });
     } finally {
-      // Close browser
       if (this.browser) {
         await this.browser.close();
       }
     }
 
-    // Generate report
     const totalDuration = this.formatDuration(Date.now() - this.startTime);
     const report: EvaluationReport = {
       id: this.evaluationId,
-      flowType: this.flow.flowType,
-      flowName: this.flow.flowName,
+      flowId: this.flow.id,
+      flowName: this.flow.name,
+      websiteName: this.flow.websiteName,
       runDate: new Date().toISOString(),
       totalSteps: this.flow.steps.length,
       completedSteps,
@@ -221,7 +216,6 @@ export class FlowEvaluator {
       steps,
     };
 
-    // Save report to file
     const reportPath = path.join(this.reportsDir, `${this.evaluationId}.json`);
     fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
 
@@ -235,6 +229,72 @@ export class FlowEvaluator {
     return report;
   }
 
+  private async executeAction(action: StepAction): Promise<void> {
+    if (!this.page) return;
+
+    // Get value - either direct or from testData
+    let value = action.value || "";
+    if (action.testDataKey && this.config.fillTestData && this.config.testData[action.testDataKey]) {
+      value = this.config.testData[action.testDataKey];
+    }
+
+    switch (action.type) {
+      case "navigate":
+        if (value) {
+          await this.page.goto(value, { waitUntil: "domcontentloaded", timeout: 30000 });
+        }
+        break;
+
+      case "click":
+        if (action.selector) {
+          await this.page.waitForSelector(action.selector, { timeout: 10000 });
+          await this.page.click(action.selector);
+          await this.page.waitForTimeout(1000); // Wait for navigation/updates
+        }
+        break;
+
+      case "fill":
+        if (action.selector && value) {
+          await this.page.waitForSelector(action.selector, { timeout: 10000 });
+          await this.page.fill(action.selector, value);
+        }
+        break;
+
+      case "select":
+        if (action.selector && value) {
+          await this.page.waitForSelector(action.selector, { timeout: 10000 });
+          await this.page.selectOption(action.selector, value);
+        }
+        break;
+
+      case "check":
+        if (action.selector) {
+          await this.page.waitForSelector(action.selector, { timeout: 10000 });
+          await this.page.check(action.selector);
+        }
+        break;
+
+      case "wait":
+        if (action.selector) {
+          await this.page.waitForSelector(action.selector, { timeout: action.waitTime || 10000 });
+        } else if (action.waitTime) {
+          await this.page.waitForTimeout(action.waitTime);
+        }
+        break;
+
+      case "scroll":
+        if (action.selector) {
+          await this.page.waitForSelector(action.selector, { timeout: 10000 });
+          await this.page.locator(action.selector).scrollIntoViewIfNeeded();
+        }
+        break;
+
+      case "screenshot":
+        // No action, just capture screenshot (handled in step processing)
+        break;
+    }
+  }
+
   private async collectPageData(page: Page): Promise<{
     title: string;
     h1: string | undefined;
@@ -242,23 +302,20 @@ export class FlowEvaluator {
     buttons: string[];
   }> {
     const title = await page.title();
-
     const h1 = await page.$eval("h1", (el) => el.textContent?.trim()).catch(() => undefined);
 
-    const formFields = await page.$$eval(
-      "input, select, textarea",
-      (elements) =>
-        elements
-          .map((el) => {
-            const input = el as HTMLInputElement;
-            return {
-              name: input.name || input.id || input.placeholder || "unnamed",
-              type: input.type || el.tagName.toLowerCase(),
-              required: input.required,
-              placeholder: input.placeholder,
-            };
-          })
-          .filter((f) => f.type !== "hidden" && f.name !== "unnamed")
+    const formFields = await page.$$eval("input, select, textarea", (elements) =>
+      elements
+        .map((el) => {
+          const input = el as HTMLInputElement;
+          return {
+            name: input.name || input.id || input.placeholder || "unnamed",
+            type: input.type || el.tagName.toLowerCase(),
+            required: input.required,
+            placeholder: input.placeholder,
+          };
+        })
+        .filter((f) => f.type !== "hidden" && f.name !== "unnamed")
     );
 
     const buttons = await page.$$eval(
@@ -269,12 +326,7 @@ export class FlowEvaluator {
           .filter((text) => text.length > 0 && text.length < 50)
     );
 
-    return {
-      title,
-      h1,
-      formFields,
-      buttons: [...new Set(buttons)], // Remove duplicates
-    };
+    return { title, h1, formFields, buttons: [...new Set(buttons)] };
   }
 
   private async takeScreenshot(page: Page, stepNumber: number): Promise<string> {
@@ -290,24 +342,21 @@ export class FlowEvaluator {
   }
 
   private formatDuration(ms: number): string {
-    if (ms < 1000) {
-      return `${ms}ms`;
-    }
+    if (ms < 1000) return `${ms}ms`;
     const seconds = Math.floor(ms / 1000);
-    if (seconds < 60) {
-      return `${seconds}s`;
-    }
+    if (seconds < 60) return `${seconds}s`;
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
     return `${minutes}m ${remainingSeconds}s`;
   }
 }
 
-export async function runEvaluation(
+export async function runDynamicEvaluation(
   config: FlowConfig,
+  flow: DynamicFlow,
   onProgress: StreamCallback
 ): Promise<EvaluationReport> {
-  const evaluator = new FlowEvaluator(config);
+  const evaluator = new DynamicFlowEvaluator(config, flow);
   return evaluator.run(onProgress);
 }
 

@@ -1,15 +1,16 @@
-# Fountain Flow Evaluator
+# Universal Flow Evaluator
 
-A web application for tracking and documenting user evaluation flows for TRT/HRT services on Fountain (fountain.net). This tool helps teams understand and monitor the patient onboarding experience.
+A web application for tracking and documenting any website's user evaluation flows. Create custom evaluation flows with a visual builder — no coding required.
 
 ## Features
 
-- **Automated Screenshot Capture** - Takes full-page screenshots at every step of the patient journey
+- **Visual Flow Builder** - Create evaluation flows for any website using a no-code interface
+- **Automated Screenshot Capture** - Takes full-page screenshots at every step
 - **Page Metadata Collection** - Collects titles, forms, buttons, load times, and all page elements
 - **Visual Reports** - Step-by-step visual reports with timeline view and summary stats
-- **Error Detection** - Automatically detects and highlights errors, broken elements, or issues
-- **Run Comparison** - Compare evaluations over time to detect UI changes and regressions
-- **Multiple Flow Support** - Evaluate Men's TRT and Women's HRT flows
+- **Error Detection** - Automatically detects and highlights errors or issues
+- **Test Data Support** - Define custom test data fields to fill forms during evaluation
+- **Multiple Viewports** - Test on desktop, tablet, and mobile viewports
 
 ## Getting Started
 
@@ -37,118 +38,115 @@ npm run dev
 
 4. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+## How It Works
+
+### 1. Create a Flow
+
+1. Click **"Create New Flow"** on the dashboard
+2. Enter the website URL you want to evaluate
+3. Add steps using the visual builder:
+   - **Navigate** - Go to a URL
+   - **Click** - Click buttons, links, or elements
+   - **Fill Input** - Fill form fields (with optional test data)
+   - **Select Option** - Choose dropdown options
+   - **Check/Toggle** - Check checkboxes or radio buttons
+   - **Wait** - Wait for elements or time delays
+   - **Scroll To** - Scroll to specific elements
+
+4. Save your flow
+
+### 2. Run Evaluation
+
+1. Select your flow from the dashboard
+2. Choose viewport size (desktop, tablet, mobile)
+3. Enable "Fill Test Data" if you want to populate forms
+4. Click **"Start Evaluation"**
+
+### 3. Review Report
+
+- View screenshots from each step
+- See page metadata (title, forms, buttons)
+- Check load times and errors
+- Export reports as JSON
+
 ## Project Structure
 
 ```
 /src
   /app
     /api
-      /run-evaluation     # API endpoint to trigger evaluations
-      /get-report         # API endpoint to get a single report
-      /get-reports        # API endpoint to list all reports
-    /evaluate             # Run evaluation page
-    /report/[id]          # View specific report page
-    page.tsx              # Landing page
-    layout.tsx            # Root layout
-    globals.css           # Global styles
-  /components
-    Header.tsx            # Navigation header
-    FlowCard.tsx          # Flow selection card
-    FeatureCard.tsx       # Feature description card
-    StepIndicator.tsx     # How it works steps
-    RecentEvaluations.tsx # Recent runs table
-  /lib
-    evaluator.ts          # Playwright flow runner
-    types.ts              # TypeScript types
+      /flows              # Flow CRUD API
+      /run-evaluation     # Evaluation execution API
+      /get-report         # Report retrieval API
+      /get-reports        # Reports listing API
     /flows
-      index.ts            # Flow exports
-      mens-trt.ts         # Men's TRT flow definition
-      womens-hrt.ts       # Women's HRT flow definition
+      /new                # Create new flow page
+      /[id]/edit          # Edit flow page
+    /evaluate             # Run evaluation page
+    /report/[id]          # View report page
+    page.tsx              # Dashboard
+  /components
+    FlowBuilder.tsx       # Visual flow builder component
+    Header.tsx            # Navigation header
+    FlowCard.tsx          # Flow display card
+    ...
+  /lib
+    dynamicEvaluator.ts   # Playwright evaluation engine
+    flowStorage.ts        # Flow storage utilities
+    types.ts              # TypeScript types
+/data
+  /flows                  # Flow definitions (JSON)
 /public
-  /reports                # Generated JSON reports
-  /screenshots            # Screenshot storage
+  /reports                # Generated reports
+  /screenshots            # Captured screenshots
 ```
 
-## How It Works
+## Step Action Types
 
-### 1. Configure
+| Action | Description | Parameters |
+|--------|-------------|------------|
+| `navigate` | Go to a URL | `value`: URL to navigate to |
+| `click` | Click an element | `selector`: CSS selector |
+| `fill` | Fill a form field | `selector`, `value` or `testDataKey` |
+| `select` | Select dropdown option | `selector`, `value` |
+| `check` | Check checkbox/radio | `selector` |
+| `wait` | Wait for element/time | `selector` or `waitTime` (ms) |
+| `scroll` | Scroll to element | `selector` |
+| `screenshot` | Capture only | (no parameters) |
 
-Select which flow to evaluate (Men's TRT or Women's HRT), choose viewport size (desktop, tablet, or mobile), and optionally enable test data filling.
+## CSS Selector Tips
 
-### 2. Run
+Use these patterns for selectors:
+- `#submit-btn` - ID selector
+- `.next-button` - Class selector
+- `button[type="submit"]` - Attribute selector
+- `a:has-text("Continue")` - Text content
+- `input[name="email"]` - Form field by name
+- `.form-container button` - Nested elements
 
-The tool uses Playwright to automatically navigate through the evaluation flow:
-- Visits each step of the patient journey
-- Captures screenshots at every page
-- Collects page metadata (forms, buttons, load times)
-- Detects any errors or issues
+## Deployment
 
-### 3. Review
+### Vercel (UI Only)
 
-View a comprehensive visual report with:
-- Summary statistics (steps completed, duration, status)
-- Screenshot gallery for each step
-- Detailed metadata for every page
-- Error highlighting and detection
+The UI works on Vercel, but Playwright evaluations won't run in serverless environments.
 
-## Configuration Options
-
-- **Flow Type**: Select Men's TRT or Women's HRT evaluation
-- **Viewport Size**: Desktop (1920×1080), Tablet (768×1024), or Mobile (375×812)
-- **Screenshot Mode**: Viewport only or full page capture
-- **Fill Test Data**: Automatically fill forms with test data during evaluation
-
-## Flow Definitions
-
-Flow definitions are located in `/src/lib/flows/`. Each flow file contains:
-
-- Start URL
-- Step definitions with:
-  - Step name
-  - Element selectors to wait for
-  - Actions to perform (clicking buttons, filling forms)
-  - Validation functions
-
-### Customizing Flows
-
-To update flow definitions based on actual site structure:
-
-1. Visit fountain.net manually and document the evaluation flow
-2. Update selectors in the flow definition files
-3. Add or remove steps as needed
-4. Test the updated flow
-
-## API Endpoints
-
-### POST /api/run-evaluation
-
-Starts a new evaluation. Returns a stream of progress updates.
-
-**Request Body:**
-```json
-{
-  "flowType": "mens-trt",
-  "fillTestData": false,
-  "screenshotMode": "viewport",
-  "viewport": "desktop",
-  "testData": {
-    "firstName": "Test",
-    "lastName": "User",
-    "email": "test@example.com",
-    "phone": "555-123-4567",
-    "dateOfBirth": "1985-06-15",
-    "state": "California"
-  }
-}
+```bash
+npx vercel --prod
 ```
 
-### GET /api/get-reports
+### Full Functionality
 
-Returns a list of all evaluation reports.
+For full evaluation support, run locally or deploy to:
+- A VPS (DigitalOcean, Linode, etc.)
+- Railway
+- Render
+- Any server that can run Node.js + Playwright
 
-### GET /api/get-report?id={evaluationId}
+## Environment Variables
 
-Returns a specific evaluation report by ID.
+| Variable | Description |
+|----------|-------------|
+| `BROWSERLESS_API_KEY` | (Optional) For cloud browser support |
 
 ## Tech Stack
 
@@ -160,12 +158,13 @@ Returns a specific evaluation report by ID.
 
 ## Future Enhancements
 
-- Scheduled automatic evaluations (daily/weekly)
-- Slack notifications when evaluations complete
-- Diff comparison between runs (detect UI changes)
-- Performance benchmarking over time
-- Multiple environment support (staging vs production)
+- Flow recording (record by clicking)
+- Scheduled evaluations
+- Slack/webhook notifications
+- Diff comparison between runs
+- Performance benchmarking
+- Team collaboration
 
 ## License
 
-Internal tool - proprietary
+MIT
