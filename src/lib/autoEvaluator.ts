@@ -245,11 +245,26 @@ export class AutoFlowEvaluator {
     });
 
     try {
-      // Connect to browser
+      // Connect to browser with timeout
       if (this.useCloudBrowser && BROWSERLESS_TOKEN) {
         const wsEndpoint = `${BROWSERLESS_URL}?token=${BROWSERLESS_TOKEN}`;
-        this.browser = await chromium.connect(wsEndpoint);
-        onProgress({ type: "info", message: "Connected to cloud browser" });
+        onProgress({ type: "info", message: "Connecting to cloud browser..." });
+        
+        // Add connection timeout
+        const connectionTimeout = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("Browser connection timed out after 30 seconds")), 30000);
+        });
+        
+        try {
+          this.browser = await Promise.race([
+            chromium.connect(wsEndpoint),
+            connectionTimeout
+          ]);
+          onProgress({ type: "info", message: "Connected to cloud browser!" });
+        } catch (connError) {
+          const errorMsg = connError instanceof Error ? connError.message : "Unknown connection error";
+          throw new Error(`Failed to connect to cloud browser: ${errorMsg}. Check your BROWSERLESS_TOKEN.`);
+        }
       } else if (this.useCloudBrowser && !BROWSERLESS_TOKEN) {
         throw new Error(
           "Cloud browser token not configured. Please add BROWSERLESS_TOKEN to environment variables."
