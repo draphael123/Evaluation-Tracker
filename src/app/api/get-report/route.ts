@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getStoredReport } from "@/lib/dynamicEvaluator";
 import { getStoredReport as getAutoStoredReport } from "@/lib/autoEvaluator";
+import { getReport as getDbReport, isDatabaseConfigured } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +19,20 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // First check in-memory storage (for serverless)
+  // First check database (if configured)
+  if (isDatabaseConfigured()) {
+    try {
+      const dbReport = await getDbReport(id);
+      if (dbReport) {
+        return NextResponse.json(dbReport);
+      }
+    } catch (error) {
+      console.error("Database error:", error);
+      // Fall through to other storage methods
+    }
+  }
+
+  // Then check in-memory storage (for serverless without DB)
   const memoryReport = getStoredReport(id) || getAutoStoredReport(id);
   if (memoryReport) {
     return NextResponse.json(memoryReport);

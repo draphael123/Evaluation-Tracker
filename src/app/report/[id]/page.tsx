@@ -13,10 +13,13 @@ import {
   ChevronDown,
   ChevronUp,
   FileJson,
+  FileText,
   Image as ImageIcon,
   Loader2,
   AlertTriangle,
+  ShieldAlert,
 } from "lucide-react";
+import { generatePDF, downloadPDF } from "@/lib/pdfExport";
 
 interface FormField {
   name: string;
@@ -51,7 +54,7 @@ interface ReportData {
   failedSteps: number;
   totalDuration: string;
   viewport: string;
-  status: "completed" | "failed" | "partial";
+  status: "completed" | "failed" | "partial" | "blocked";
   steps: StepData[];
 }
 
@@ -129,6 +132,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
   const [error, setError] = useState<string | null>(null);
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set([1]));
   const [selectedStep, setSelectedStep] = useState<number>(1);
+  const [exportingPDF, setExportingPDF] = useState(false);
 
   useEffect(() => {
     const fetchReport = async () => {
@@ -173,6 +177,37 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
     a.download = `report-${report.id}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const exportPDF = async () => {
+    if (!report) return;
+    setExportingPDF(true);
+    try {
+      // First, resolve all screenshot data URLs for the PDF
+      const reportWithScreenshots = { ...report };
+      for (const step of reportWithScreenshots.steps) {
+        if (step.screenshot && !step.screenshot.startsWith("data:")) {
+          try {
+            const response = await fetch(`/api/screenshot?path=${encodeURIComponent(step.screenshot)}`);
+            if (response.ok) {
+              const data = await response.json();
+              step.screenshot = data.dataUrl;
+            }
+          } catch {
+            // Keep original path if fetch fails
+          }
+        }
+      }
+      
+      const blob = await generatePDF(reportWithScreenshots);
+      const filename = `evaluation-report-${report.flowName.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.pdf`;
+      downloadPDF(blob, filename);
+    } catch (err) {
+      console.error("Failed to export PDF:", err);
+      alert("Failed to export PDF. Please try again.");
+    } finally {
+      setExportingPDF(false);
+    }
   };
 
   if (loading) {
@@ -250,11 +285,24 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
                 className="px-4 py-2 rounded-lg glass flex items-center gap-2 hover:border-[var(--accent)] transition-colors"
               >
                 <FileJson className="w-4 h-4" />
-                Export JSON
+                JSON
               </button>
-              <button className="px-4 py-2 rounded-lg glass flex items-center gap-2 hover:border-[var(--accent)] transition-colors">
-                <Download className="w-4 h-4" />
-                Download All
+              <button
+                onClick={exportPDF}
+                disabled={exportingPDF}
+                className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--accent)] to-[#38bdf8] text-[var(--background)] font-medium flex items-center gap-2 hover:shadow-lg hover:shadow-[var(--accent-glow)] transition-all disabled:opacity-50"
+              >
+                {exportingPDF ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-4 h-4" />
+                    Export PDF
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -268,10 +316,14 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
               <div className="flex items-center gap-2">
                 {report.status === "completed" ? (
                   <CheckCircle2 className="w-5 h-5 text-[var(--success)]" />
+                ) : report.status === "blocked" ? (
+                  <ShieldAlert className="w-5 h-5 text-orange-500" />
                 ) : (
                   <XCircle className="w-5 h-5 text-[var(--error)]" />
                 )}
-                <span className="font-semibold capitalize">{report.status}</span>
+                <span className={`font-semibold capitalize ${report.status === "blocked" ? "text-orange-500" : ""}`}>
+                  {report.status}
+                </span>
               </div>
             </div>
             <div className="glass rounded-xl p-4">

@@ -1,12 +1,12 @@
 import { chromium, Browser, Page } from "playwright";
 import { v4 as uuidv4 } from "uuid";
 import {
-  FlowConfig,
   StepResult,
   EvaluationReport,
   FormField,
   viewportSizes,
 } from "./types";
+import { saveReport, isDatabaseConfigured } from "./db";
 
 // Check if we're in a serverless environment
 const isServerless: boolean = process.env.VERCEL === "1" || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
@@ -479,8 +479,18 @@ export class AutoFlowEvaluator {
       steps,
     };
 
-    // Store report
+    // Store report in memory (always, as fallback)
     reportsStore.set(this.evaluationId, report);
+
+    // Save to database if configured
+    if (isDatabaseConfigured()) {
+      try {
+        await saveReport(report);
+        onProgress({ type: "info", message: "Report saved to database" });
+      } catch (error) {
+        console.error("Failed to save report to database:", error);
+      }
+    }
 
     // Try filesystem for local dev
     if (!isServerless) {

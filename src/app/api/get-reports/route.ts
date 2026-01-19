@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getAllStoredReports } from "@/lib/dynamicEvaluator";
 import { getAllStoredReports as getAllAutoStoredReports } from "@/lib/autoEvaluator";
+import { getReports as getDbReports, isDatabaseConfigured } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +23,29 @@ interface ReportSummary {
 export async function GET(request: NextRequest) {
   const reports: ReportSummary[] = [];
 
-  // Get reports from in-memory storage (serverless)
+  // First check database (if configured)
+  if (isDatabaseConfigured()) {
+    try {
+      const { reports: dbReports } = await getDbReports(50, 0);
+      for (const report of dbReports) {
+        reports.push({
+          id: report.id,
+          flowId: report.flowId,
+          flowName: report.flowName,
+          runDate: report.runDate,
+          status: report.status,
+          completedSteps: report.completedSteps,
+          totalSteps: report.totalSteps,
+          totalDuration: report.totalDuration,
+        });
+      }
+    } catch (error) {
+      console.error("Database error:", error);
+      // Fall through to other storage methods
+    }
+  }
+
+  // Get reports from in-memory storage (serverless without DB)
   const memoryReports = [...getAllStoredReports(), ...getAllAutoStoredReports()];
   for (const report of memoryReports) {
     // Skip duplicates
@@ -48,7 +71,7 @@ export async function GET(request: NextRequest) {
       const files = fs.readdirSync(reportsDir).filter((f) => f.endsWith(".json"));
 
       for (const file of files) {
-        // Skip if already in memory
+        // Skip if already found
         const id = file.replace(".json", "");
         if (reports.some((r) => r.id === id)) continue;
 
