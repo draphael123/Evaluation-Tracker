@@ -49,3 +49,5 @@ public/reports/*
 
 # OS
 Thumbs.db
+
+.vercel
