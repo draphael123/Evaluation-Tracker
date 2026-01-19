@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as fs from "fs";
 import * as path from "path";
 import { getAllStoredReports } from "@/lib/dynamicEvaluator";
+import { getAllStoredReports as getAllAutoStoredReports } from "@/lib/autoEvaluator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,8 +23,11 @@ export async function GET(request: NextRequest) {
   const reports: ReportSummary[] = [];
 
   // Get reports from in-memory storage (serverless)
-  const memoryReports = getAllStoredReports();
+  const memoryReports = [...getAllStoredReports(), ...getAllAutoStoredReports()];
   for (const report of memoryReports) {
+    // Skip duplicates
+    if (reports.some((r) => r.id === report.id)) continue;
+    
     reports.push({
       id: report.id,
       flowId: report.flowId,

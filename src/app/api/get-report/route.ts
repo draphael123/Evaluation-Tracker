@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as fs from "fs";
 import * as path from "path";
 import { getStoredReport } from "@/lib/dynamicEvaluator";
+import { getStoredReport as getAutoStoredReport } from "@/lib/autoEvaluator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
   }
 
   // First check in-memory storage (for serverless)
-  const memoryReport = getStoredReport(id);
+  const memoryReport = getStoredReport(id) || getAutoStoredReport(id);
   if (memoryReport) {
     return NextResponse.json(memoryReport);
   }

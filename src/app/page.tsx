@@ -25,6 +25,7 @@ import {
   Trash2,
   MoreVertical,
   Loader2,
+  MousePointer,
 } from "lucide-react";
 
 const howItWorksSteps = [
@@ -196,18 +197,19 @@ export default function Home() {
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-fade-in-up-delay-3">
               <Link
-                href="/flows/new"
+                href="/quick-evaluate"
                 className="group px-8 py-4 rounded-xl bg-gradient-to-r from-[var(--accent)] to-[#38bdf8] text-[var(--background)] font-semibold text-lg shadow-lg shadow-[var(--accent-glow)] hover:shadow-xl hover:shadow-[var(--accent-glow)] hover:scale-[1.02] transition-all duration-300 flex items-center gap-2"
               >
-                <Plus className="w-5 h-5" />
-                Create New Flow
+                <Zap className="w-5 h-5" />
+                Quick Evaluate
               </Link>
-              <button
-                onClick={() => document.getElementById("flows-section")?.scrollIntoView({ behavior: "smooth" })}
-                className="px-8 py-4 rounded-xl glass text-[var(--foreground)] font-medium hover:border-[var(--accent)] transition-all duration-300"
+              <Link
+                href="/flows/new"
+                className="px-8 py-4 rounded-xl glass text-[var(--foreground)] font-medium hover:border-[var(--accent)] transition-all duration-300 flex items-center gap-2"
               >
-                View Existing Flows
-              </button>
+                <Plus className="w-5 h-5" />
+                Create Custom Flow
+              </Link>
             </div>
           </div>
         </div>

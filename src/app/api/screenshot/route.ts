@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as fs from "fs";
 import * as path from "path";
 import { getScreenshot } from "@/lib/dynamicEvaluator";
+import { getScreenshot as getAutoScreenshot } from "@/lib/autoEvaluator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
   }
 
   // First check in-memory storage (returns base64 data URL)
-  const memoryScreenshot = getScreenshot(screenshotPath);
+  const memoryScreenshot = getScreenshot(screenshotPath) || getAutoScreenshot(screenshotPath);
   if (memoryScreenshot) {
     // Return the base64 data URL directly
     return NextResponse.json({ dataUrl: memoryScreenshot });

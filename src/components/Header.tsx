@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Activity, History, Settings } from "lucide-react";
+import { Activity, History, Settings, Zap } from "lucide-react";
 
 export default function Header() {
   return (
@@ -13,7 +13,7 @@ export default function Header() {
               <Activity className="w-5 h-5 text-[var(--background)]" strokeWidth={2.5} />
             </div>
             <span className="text-xl font-semibold tracking-tight">
-              Fountain<span className="text-[var(--foreground-muted)]">Flow</span>
+              Flow<span className="text-[var(--foreground-muted)]">Evaluator</span>
             </span>
           </Link>
 
@@ -25,11 +25,18 @@ export default function Header() {
               Dashboard
             </Link>
             <Link
+              href="/quick-evaluate"
+              className="px-4 py-2 text-sm font-medium text-[var(--accent)] hover:text-[var(--foreground)] transition-colors flex items-center gap-2"
+            >
+              <Zap className="w-4 h-4" />
+              Quick Evaluate
+            </Link>
+            <Link
               href="/evaluate"
               className="px-4 py-2 text-sm font-medium text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors flex items-center gap-2"
             >
               <History className="w-4 h-4" />
-              Reports
+              Custom Flows
             </Link>
             <button className="p-2 rounded-lg hover:bg-[var(--background-subtle)] text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-all">
               <Settings className="w-5 h-5" />
