@@ -59,6 +59,9 @@ export default function QuickEvaluatePage() {
   const [evaluationId, setEvaluationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [infoMessages, setInfoMessages] = useState<string[]>([]);
+  const [liveScreenshot, setLiveScreenshot] = useState<string | null>(null);
+  const [currentUrl, setCurrentUrl] = useState<string | null>(null);
+  const [currentAction, setCurrentAction] = useState<string | null>(null);
 
   // Check config on load
   useEffect(() => {
@@ -96,6 +99,9 @@ export default function QuickEvaluatePage() {
     setSteps([]);
     setInfoMessages([]);
     setCurrentStep(0);
+    setLiveScreenshot(null);
+    setCurrentUrl(null);
+    setCurrentAction("Initializing...");
 
     try {
       const response = await fetch("/api/auto-evaluate", {
@@ -133,11 +139,15 @@ export default function QuickEvaluatePage() {
           try {
             const data = JSON.parse(line);
 
-            if (data.type === "init") {
-              setEvaluationId(data.evaluationId);
-            } else if (data.type === "info") {
-              setInfoMessages((prev) => [...prev.slice(-4), data.message]);
-            } else if (data.type === "step-start") {
+                        if (data.type === "init") {
+                          setEvaluationId(data.evaluationId);
+                          setCurrentAction("Connecting to browser...");
+                        } else if (data.type === "info") {
+                          setInfoMessages((prev) => [...prev.slice(-4), data.message]);
+                          setCurrentAction(data.message);
+                        } else if (data.type === "step-start") {
+                          setCurrentUrl(data.url);
+                          setCurrentAction(`Loading: ${data.name}`);
               setCurrentStep(data.stepNumber);
               setSteps((prev) => [
                 ...prev,
@@ -149,6 +159,13 @@ export default function QuickEvaluatePage() {
                 },
               ]);
                         } else if (data.type === "step-complete") {
+                          // Update live screenshot preview
+                          if (data.screenshotPreview) {
+                            setLiveScreenshot(data.screenshotPreview);
+                          }
+                          setCurrentUrl(data.url);
+                          setCurrentAction(`Captured: ${data.name}`);
+                          
                           setSteps((prev) =>
                             prev.map((s) =>
                               s.stepNumber === data.stepNumber
@@ -179,8 +196,10 @@ export default function QuickEvaluatePage() {
                           );
                         } else if (data.type === "option-selected") {
                           setInfoMessages((prev) => [...prev.slice(-3), `✓ Selected: "${data.option}"`]);
+                          setCurrentAction(`Selecting: "${data.option}"`);
                         } else if (data.type === "form-filled") {
                           setInfoMessages((prev) => [...prev.slice(-3), `✓ Filled ${data.filledFields} field(s)`]);
+                          setCurrentAction(`Filling ${data.filledFields} form field(s)`);
                         } else if (data.type === "blocked") {
                           setSteps((prev) =>
                             prev.map((s) =>
@@ -191,6 +210,7 @@ export default function QuickEvaluatePage() {
                           );
                           setInfoMessages((prev) => [...prev.slice(-2), `⛔ BLOCKED: ${data.reason}`]);
                           setError(`Flow blocked: ${data.reason}`);
+                          setCurrentAction(`⛔ Blocked: ${data.reason}`);
                         } else if (data.type === "step-error") {
               setSteps((prev) =>
                 prev.map((s) =>
@@ -199,13 +219,14 @@ export default function QuickEvaluatePage() {
                     : s
                 )
               );
-            } else if (data.type === "complete") {
-              setIsRunning(false);
-              // Redirect to report after a brief delay
-              setTimeout(() => {
-                router.push(`/report/${data.evaluationId}`);
-              }, 1500);
-            } else if (data.type === "error") {
+                        } else if (data.type === "complete") {
+                              setIsRunning(false);
+                              setCurrentAction("✓ Evaluation complete!");
+                              // Redirect to report after a brief delay
+                              setTimeout(() => {
+                                router.push(`/report/${data.evaluationId}`);
+                              }, 2000);
+                            } else if (data.type === "error") {
               setError(data.message);
               setIsRunning(false);
             }
@@ -404,12 +425,49 @@ export default function QuickEvaluatePage() {
 
             {/* Progress */}
             <div className="glass rounded-2xl p-6">
-              <h2 className="text-lg font-semibold mb-6 flex items-center gap-2">
+              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                 <Zap className="w-5 h-5 text-[var(--accent)]" />
                 Live Progress
               </h2>
 
-              {steps.length === 0 ? (
+              {/* Live Screenshot Preview */}
+              {isRunning && (
+                <div className="mb-4">
+                  <div className="relative aspect-video bg-[var(--background-subtle)] rounded-xl overflow-hidden border border-[var(--border)]">
+                    {liveScreenshot ? (
+                      <img
+                        src={liveScreenshot}
+                        alt="Live preview"
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <div className="text-center">
+                          <Loader2 className="w-8 h-8 animate-spin text-[var(--accent)] mx-auto mb-2" />
+                          <p className="text-xs text-[var(--foreground-muted)]">Loading page...</p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Status Overlay */}
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+                      {currentAction && (
+                        <div className="flex items-center gap-2 text-white text-sm mb-1">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <span className="truncate">{currentAction}</span>
+                        </div>
+                      )}
+                      {currentUrl && (
+                        <div className="text-xs text-white/60 truncate font-mono">
+                          {currentUrl}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {steps.length === 0 && !isRunning ? (
                 <div className="text-center py-16">
                   <div className="w-16 h-16 rounded-full bg-[var(--background-subtle)] flex items-center justify-center mx-auto mb-4">
                     <Zap className="w-8 h-8 text-[var(--foreground-dim)]" />
@@ -419,7 +477,7 @@ export default function QuickEvaluatePage() {
                     Enter a URL and click Start. The system will automatically navigate through the flow.
                   </p>
                 </div>
-              ) : (
+              ) : steps.length > 0 ? (
                 <div className="space-y-3 max-h-[500px] overflow-y-auto">
                   {/* Info Messages */}
                   {infoMessages.length > 0 && (
@@ -521,7 +579,7 @@ export default function QuickEvaluatePage() {
                     </div>
                   )}
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         </div>

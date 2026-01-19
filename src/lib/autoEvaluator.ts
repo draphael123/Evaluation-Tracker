@@ -330,12 +330,16 @@ export class AutoFlowEvaluator {
 
         steps.push(stepResult);
 
+        // Send screenshot data for live preview
+        const screenshotDataUrl = screenshotsStore.get(screenshot);
+        
         onProgress({
           type: "step-complete",
           stepNumber,
           name: stepName,
           url: currentUrl,
           screenshot,
+          screenshotPreview: screenshotDataUrl, // Send actual image data for live preview
           duration: stepResult.loadTime,
           formFields: pageData.formFields.length,
           buttons: pageData.buttons.length,
