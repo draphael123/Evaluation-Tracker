@@ -17,12 +17,13 @@ import {
   Settings,
   Info,
   ExternalLink,
+  ShieldAlert,
 } from "lucide-react";
 
 interface EvaluationStep {
   stepNumber: number;
   name: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "blocked";
   url?: string;
   screenshot?: string;
   duration?: string;
@@ -31,6 +32,7 @@ interface EvaluationStep {
   error?: string;
   selectedOption?: string;
   filledFields?: number;
+  blockReason?: string;
 }
 
 const viewportOptions = [
@@ -179,6 +181,16 @@ export default function QuickEvaluatePage() {
                           setInfoMessages((prev) => [...prev.slice(-3), `✓ Selected: "${data.option}"`]);
                         } else if (data.type === "form-filled") {
                           setInfoMessages((prev) => [...prev.slice(-3), `✓ Filled ${data.filledFields} field(s)`]);
+                        } else if (data.type === "blocked") {
+                          setSteps((prev) =>
+                            prev.map((s) =>
+                              s.stepNumber === data.stepNumber
+                                ? { ...s, status: "blocked", blockReason: data.reason }
+                                : s
+                            )
+                          );
+                          setInfoMessages((prev) => [...prev.slice(-2), `⛔ BLOCKED: ${data.reason}`]);
+                          setError(`Flow blocked: ${data.reason}`);
                         } else if (data.type === "step-error") {
               setSteps((prev) =>
                 prev.map((s) =>
@@ -422,40 +434,46 @@ export default function QuickEvaluatePage() {
                   )}
 
                   {steps.map((step) => (
-                    <div
-                      key={step.stepNumber}
-                      className={`p-4 rounded-xl border transition-all ${
-                        step.status === "running"
-                          ? "border-[var(--accent)] bg-[var(--accent-muted)]"
-                          : step.status === "completed"
-                          ? "border-[var(--success)]/30 bg-[var(--success)]/5"
-                          : step.status === "failed"
-                          ? "border-[var(--error)]/30 bg-[var(--error)]/5"
-                          : "border-[var(--border)] bg-[var(--background-subtle)]"
-                      }`}
-                    >
+                                    <div
+                                      key={step.stepNumber}
+                                      className={`p-4 rounded-xl border transition-all ${
+                                        step.status === "running"
+                                          ? "border-[var(--accent)] bg-[var(--accent-muted)]"
+                                          : step.status === "completed"
+                                          ? "border-[var(--success)]/30 bg-[var(--success)]/5"
+                                          : step.status === "failed"
+                                          ? "border-[var(--error)]/30 bg-[var(--error)]/5"
+                                          : step.status === "blocked"
+                                          ? "border-orange-500/30 bg-orange-500/5"
+                                          : "border-[var(--border)] bg-[var(--background-subtle)]"
+                                      }`}
+                                    >
                       <div className="flex items-center gap-3">
-                        <div
-                          className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                            step.status === "running"
-                              ? "bg-[var(--accent)] text-[var(--background)]"
-                              : step.status === "completed"
-                              ? "bg-[var(--success)] text-white"
-                              : step.status === "failed"
-                              ? "bg-[var(--error)] text-white"
-                              : "bg-[var(--border)] text-[var(--foreground-muted)]"
-                          }`}
-                        >
-                          {step.status === "running" ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : step.status === "completed" ? (
-                            <CheckCircle2 className="w-4 h-4" />
-                          ) : step.status === "failed" ? (
-                            <XCircle className="w-4 h-4" />
-                          ) : (
-                            <span className="text-sm font-medium">{step.stepNumber}</span>
-                          )}
-                        </div>
+                                      <div
+                                        className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                          step.status === "running"
+                                            ? "bg-[var(--accent)] text-[var(--background)]"
+                                            : step.status === "completed"
+                                            ? "bg-[var(--success)] text-white"
+                                            : step.status === "failed"
+                                            ? "bg-[var(--error)] text-white"
+                                            : step.status === "blocked"
+                                            ? "bg-orange-500 text-white"
+                                            : "bg-[var(--border)] text-[var(--foreground-muted)]"
+                                        }`}
+                                      >
+                                        {step.status === "running" ? (
+                                          <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : step.status === "completed" ? (
+                                          <CheckCircle2 className="w-4 h-4" />
+                                        ) : step.status === "failed" ? (
+                                          <XCircle className="w-4 h-4" />
+                                        ) : step.status === "blocked" ? (
+                                          <ShieldAlert className="w-4 h-4" />
+                                        ) : (
+                                          <span className="text-sm font-medium">{step.stepNumber}</span>
+                                        )}
+                                      </div>
 
                         <div className="flex-1 min-w-0">
                                           <div className="font-medium text-sm truncate">{step.name}</div>
@@ -474,7 +492,12 @@ export default function QuickEvaluatePage() {
                                               ✓ {step.filledFields} field(s) filled
                                             </div>
                                           )}
-                                          {step.error && (
+                                          {step.blockReason && (
+                                            <div className="text-xs text-orange-500 font-medium mt-1">
+                                              ⛔ {step.blockReason}
+                                            </div>
+                                          )}
+                                          {step.error && !step.blockReason && (
                                             <div className="text-xs text-[var(--error)]">{step.error}</div>
                                           )}
                                         </div>

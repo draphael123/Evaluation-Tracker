@@ -92,6 +92,95 @@ const STOP_PATTERNS = [
   "book appointment",
 ];
 
+// Blocking patterns - things that require human intervention
+const BLOCKING_PATTERNS = {
+  // Two-factor authentication
+  twoFactor: [
+    "two-factor",
+    "two factor",
+    "2fa",
+    "2-fa",
+    "authenticator",
+    "verification code",
+    "security code",
+    "enter the code",
+    "enter code",
+    "6-digit code",
+    "6 digit code",
+    "one-time password",
+    "one time password",
+    "otp",
+  ],
+  // Email verification
+  emailVerification: [
+    "verify your email",
+    "check your email",
+    "email verification",
+    "confirm your email",
+    "we sent you an email",
+    "we've sent you an email",
+    "sent a verification",
+    "sent you a link",
+    "click the link in your email",
+    "check your inbox",
+    "verification link",
+  ],
+  // SMS/Phone verification
+  smsVerification: [
+    "verify your phone",
+    "verify phone number",
+    "sms verification",
+    "text verification",
+    "we sent a code to",
+    "sent to your phone",
+    "enter the code we sent",
+    "code sent to",
+    "verification text",
+  ],
+  // CAPTCHA
+  captcha: [
+    "captcha",
+    "i'm not a robot",
+    "i am not a robot",
+    "prove you're human",
+    "prove you are human",
+    "human verification",
+    "security check",
+    "recaptcha",
+    "hcaptcha",
+    "cloudflare",
+  ],
+  // Login required
+  loginRequired: [
+    "please log in",
+    "please login",
+    "please sign in",
+    "you must be logged in",
+    "login required",
+    "sign in required",
+    "authentication required",
+    "access denied",
+    "unauthorized",
+    "session expired",
+  ],
+  // Account/signup walls
+  accountWall: [
+    "create an account to continue",
+    "sign up to continue",
+    "register to continue",
+    "join to continue",
+    "create account to",
+    "sign up to see",
+    "register to see",
+  ],
+};
+
+interface BlockingResult {
+  isBlocked: boolean;
+  reason: string;
+  type: string;
+}
+
 // Default test data for form filling
 const DEFAULT_TEST_DATA: Record<string, string> = {
   firstName: "Test",
@@ -252,6 +341,21 @@ export class AutoFlowEvaluator {
           buttons: pageData.buttons.length,
         });
 
+        // Check for blockers (2FA, email verification, CAPTCHA, etc.)
+        const blockCheck = await this.checkForBlockers();
+        if (blockCheck.isBlocked) {
+          onProgress({
+            type: "blocked",
+            stepNumber,
+            reason: blockCheck.reason,
+            blockType: blockCheck.type,
+          });
+          
+          // Update the step with the blocking error
+          stepResult.errors.push(`BLOCKED: ${blockCheck.reason}`);
+          break;
+        }
+
         // Check if we should stop
         if (await this.isEndOfFlow()) {
           onProgress({
@@ -350,6 +454,15 @@ export class AutoFlowEvaluator {
     const totalDuration = this.formatDuration(Date.now() - this.startTime);
     const completedSteps = steps.filter((s) => s.errors.length === 0).length;
     const failedSteps = steps.filter((s) => s.errors.length > 0).length;
+    const blockedSteps = steps.filter((s) => s.errors.some(e => e.startsWith("BLOCKED:"))).length;
+
+    // Determine status
+    let status: "completed" | "partial" | "failed" | "blocked" = "completed";
+    if (blockedSteps > 0) {
+      status = "blocked";
+    } else if (failedSteps > 0) {
+      status = completedSteps > 0 ? "partial" : "failed";
+    }
 
     const report: EvaluationReport = {
       id: this.evaluationId,
@@ -362,7 +475,7 @@ export class AutoFlowEvaluator {
       failedSteps,
       totalDuration,
       viewport: this.config.viewport,
-      status: failedSteps > 0 ? (completedSteps > 0 ? "partial" : "failed") : "completed",
+      status,
       steps,
     };
 
@@ -448,7 +561,6 @@ export class AutoFlowEvaluator {
       "thanks for",
       "we'll be in touch",
       "we will contact",
-      "check your email",
       "your results",
       "assessment complete",
       "evaluation complete",
@@ -461,6 +573,78 @@ export class AutoFlowEvaluator {
     }
 
     return false;
+  }
+
+  // Check if the page has a blocking element that requires human intervention
+  private async checkForBlockers(): Promise<BlockingResult> {
+    if (!this.page) return { isBlocked: false, reason: "", type: "" };
+
+    try {
+      const pageText = (await this.page.textContent("body") || "").toLowerCase();
+      const pageTitle = (await this.page.title() || "").toLowerCase();
+      const combinedText = pageText + " " + pageTitle;
+
+      // Check each blocking category
+      for (const [blockType, patterns] of Object.entries(BLOCKING_PATTERNS)) {
+        for (const pattern of patterns) {
+          if (combinedText.includes(pattern)) {
+            // Map block type to user-friendly message
+            const reasons: Record<string, string> = {
+              twoFactor: "Two-Factor Authentication (2FA) required",
+              emailVerification: "Email verification required",
+              smsVerification: "SMS/Phone verification required",
+              captcha: "CAPTCHA verification required",
+              loginRequired: "Login/Authentication required",
+              accountWall: "Account creation required to continue",
+            };
+            return {
+              isBlocked: true,
+              reason: reasons[blockType] || "Verification required",
+              type: blockType,
+            };
+          }
+        }
+      }
+
+      // Also check for specific input fields that indicate blocking
+      const blockingInputSelectors = [
+        'input[name*="otp"]',
+        'input[name*="code"]',
+        'input[name*="verification"]',
+        'input[placeholder*="verification code"]',
+        'input[placeholder*="enter code"]',
+        'input[aria-label*="verification"]',
+        'input[aria-label*="code"]',
+        '[class*="captcha"]',
+        '[id*="captcha"]',
+        'iframe[src*="recaptcha"]',
+        'iframe[src*="hcaptcha"]',
+        'iframe[title*="recaptcha"]',
+      ];
+
+      for (const selector of blockingInputSelectors) {
+        try {
+          const element = await this.page.$(selector);
+          if (element) {
+            const isVisible = await element.isVisible();
+            if (isVisible) {
+              return {
+                isBlocked: true,
+                reason: "Verification input detected (code entry required)",
+                type: "verificationInput",
+              };
+            }
+          }
+        } catch {
+          // Continue
+        }
+      }
+
+    } catch {
+      // If we can't check, assume not blocked
+    }
+
+    return { isBlocked: false, reason: "", type: "" };
   }
 
   // Select an option on quiz/selection pages

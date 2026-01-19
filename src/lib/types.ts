@@ -91,7 +91,7 @@ export interface EvaluationReport {
   failedSteps: number;
   totalDuration: string;
   viewport: string;
-  status: "completed" | "failed" | "partial";
+  status: "completed" | "failed" | "partial" | "blocked";
   steps: StepResult[];
 }
 
