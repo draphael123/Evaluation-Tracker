@@ -17,6 +17,8 @@ import {
   Camera,
   Clock,
   AlertCircle,
+  ExternalLink,
+  Info,
 } from "lucide-react";
 
 interface EvaluationStep {
@@ -44,6 +46,8 @@ function EvaluateContent() {
   const [selectedFlowId, setSelectedFlowId] = useState<string>(flowIdParam || "");
   const [selectedFlow, setSelectedFlow] = useState<DynamicFlow | null>(null);
   const [isLoadingFlows, setIsLoadingFlows] = useState(true);
+  const [canRunEvaluations, setCanRunEvaluations] = useState<boolean | null>(null);
+  const [isVercel, setIsVercel] = useState(false);
 
   const [config, setConfig] = useState({
     fillTestData: false,
@@ -58,8 +62,21 @@ function EvaluateContent() {
   const [evaluationId, setEvaluationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch available flows
+  // Fetch config and flows
   useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const response = await fetch("/api/config");
+        if (response.ok) {
+          const data = await response.json();
+          setCanRunEvaluations(data.canRunEvaluations);
+          setIsVercel(data.isVercel);
+        }
+      } catch {
+        setCanRunEvaluations(true); // Assume local if config fails
+      }
+    };
+
     const fetchFlows = async () => {
       try {
         const response = await fetch("/api/flows");
@@ -79,6 +96,7 @@ function EvaluateContent() {
       }
     };
 
+    fetchConfig();
     fetchFlows();
   }, [flowIdParam]);
 
@@ -217,12 +235,73 @@ function EvaluateContent() {
 
       <main className="pt-24 pb-16">
         <div className="max-w-6xl mx-auto px-6">
-          <div className="mb-12">
+          <div className="mb-8">
             <h1 className="text-3xl font-bold mb-2">Run Evaluation</h1>
             <p className="text-[var(--foreground-muted)]">
               Configure and execute a flow evaluation
             </p>
           </div>
+
+          {/* Setup Banner */}
+          {isVercel && canRunEvaluations === false && (
+            <div className="mb-8 p-6 rounded-2xl bg-[var(--warning)]/10 border border-[var(--warning)]/30">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-xl bg-[var(--warning)]/20 flex items-center justify-center flex-shrink-0">
+                  <Info className="w-5 h-5 text-[var(--warning)]" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-[var(--warning)] mb-2">
+                    Cloud Browser Setup Required
+                  </h3>
+                  <p className="text-sm text-[var(--foreground-muted)] mb-4">
+                    To run evaluations from this website, you need to connect a cloud browser service.
+                    This is a one-time setup that takes 2 minutes.
+                  </p>
+                  <div className="space-y-3 text-sm">
+                    <div className="flex items-start gap-2">
+                      <span className="w-5 h-5 rounded-full bg-[var(--warning)]/20 text-[var(--warning)] flex items-center justify-center text-xs font-bold flex-shrink-0">1</span>
+                      <span>
+                        Sign up for a free account at{" "}
+                        <a
+                          href="https://browserless.io"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[var(--accent)] hover:underline inline-flex items-center gap-1"
+                        >
+                          browserless.io
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="w-5 h-5 rounded-full bg-[var(--warning)]/20 text-[var(--warning)] flex items-center justify-center text-xs font-bold flex-shrink-0">2</span>
+                      <span>Copy your API token from the dashboard</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="w-5 h-5 rounded-full bg-[var(--warning)]/20 text-[var(--warning)] flex items-center justify-center text-xs font-bold flex-shrink-0">3</span>
+                      <span>
+                        Add it to{" "}
+                        <a
+                          href="https://vercel.com/dashboard"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[var(--accent)] hover:underline inline-flex items-center gap-1"
+                        >
+                          Vercel Environment Variables
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                        {" "}as <code className="px-1.5 py-0.5 rounded bg-[var(--background-subtle)] font-mono text-xs">BROWSERLESS_TOKEN</code>
+                      </span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="w-5 h-5 rounded-full bg-[var(--warning)]/20 text-[var(--warning)] flex items-center justify-center text-xs font-bold flex-shrink-0">4</span>
+                      <span>Redeploy your app</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {flows.length === 0 ? (
             <div className="glass rounded-2xl p-12 text-center">

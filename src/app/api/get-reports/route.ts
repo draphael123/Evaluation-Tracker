@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as fs from "fs";
 import * as path from "path";
+import { getAllStoredReports } from "@/lib/dynamicEvaluator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 interface ReportSummary {
   id: string;
-  flowType: string;
+  flowId: string;
+  flowType?: string;
   flowName: string;
   runDate: string;
   status: string;
@@ -17,47 +19,62 @@ interface ReportSummary {
 }
 
 export async function GET(request: NextRequest) {
+  const reports: ReportSummary[] = [];
+
+  // Get reports from in-memory storage (serverless)
+  const memoryReports = getAllStoredReports();
+  for (const report of memoryReports) {
+    reports.push({
+      id: report.id,
+      flowId: report.flowId,
+      flowName: report.flowName,
+      runDate: report.runDate,
+      status: report.status,
+      completedSteps: report.completedSteps,
+      totalSteps: report.totalSteps,
+      totalDuration: report.totalDuration,
+    });
+  }
+
+  // Also check filesystem (for local development)
   const reportsDir = path.join(process.cwd(), "public", "reports");
 
-  if (!fs.existsSync(reportsDir)) {
-    return NextResponse.json([]);
-  }
+  if (fs.existsSync(reportsDir)) {
+    try {
+      const files = fs.readdirSync(reportsDir).filter((f) => f.endsWith(".json"));
 
-  try {
-    const files = fs.readdirSync(reportsDir).filter((f) => f.endsWith(".json"));
-    
-    const reports: ReportSummary[] = [];
-    
-    for (const file of files) {
-      try {
-        const filePath = path.join(reportsDir, file);
-        const data = fs.readFileSync(filePath, "utf-8");
-        const report = JSON.parse(data);
-        
-        reports.push({
-          id: report.id,
-          flowType: report.flowType,
-          flowName: report.flowName,
-          runDate: report.runDate,
-          status: report.status,
-          completedSteps: report.completedSteps,
-          totalSteps: report.totalSteps,
-          totalDuration: report.totalDuration,
-        });
-      } catch {
-        // Skip invalid reports
+      for (const file of files) {
+        // Skip if already in memory
+        const id = file.replace(".json", "");
+        if (reports.some((r) => r.id === id)) continue;
+
+        try {
+          const filePath = path.join(reportsDir, file);
+          const data = fs.readFileSync(filePath, "utf-8");
+          const report = JSON.parse(data);
+
+          reports.push({
+            id: report.id,
+            flowId: report.flowId,
+            flowType: report.flowType,
+            flowName: report.flowName,
+            runDate: report.runDate,
+            status: report.status,
+            completedSteps: report.completedSteps,
+            totalSteps: report.totalSteps,
+            totalDuration: report.totalDuration,
+          });
+        } catch {
+          // Skip invalid reports
+        }
       }
+    } catch {
+      // Ignore filesystem errors
     }
-
-    // Sort by date, newest first
-    reports.sort((a, b) => new Date(b.runDate).getTime() - new Date(a.runDate).getTime());
-
-    return NextResponse.json(reports);
-  } catch (error) {
-    return NextResponse.json(
-      { error: "Failed to list reports" },
-      { status: 500 }
-    );
   }
-}
 
+  // Sort by date, newest first
+  reports.sort((a, b) => new Date(b.runDate).getTime() - new Date(a.runDate).getTime());
+
+  return NextResponse.json(reports);
+}

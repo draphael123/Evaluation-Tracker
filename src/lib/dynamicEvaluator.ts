@@ -1,7 +1,5 @@
 import { chromium, Browser, Page } from "playwright";
 import { v4 as uuidv4 } from "uuid";
-import * as fs from "fs";
-import * as path from "path";
 import {
   FlowConfig,
   DynamicFlow,
@@ -12,8 +10,33 @@ import {
   StepAction,
 } from "./types";
 
+// Check if we're in a serverless environment (Vercel)
+const isServerless = process.env.VERCEL === "1" || process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+// Browserless.io configuration
+const BROWSERLESS_URL = process.env.BROWSERLESS_URL || "wss://chrome.browserless.io";
+const BROWSERLESS_TOKEN = process.env.BROWSERLESS_TOKEN;
+
 export interface StreamCallback {
   (data: { type: string; [key: string]: any }): void;
+}
+
+// In-memory storage for serverless environments
+const reportsStore = new Map<string, EvaluationReport>();
+const screenshotsStore = new Map<string, string>(); // base64 screenshots
+
+export function getStoredReport(id: string): EvaluationReport | undefined {
+  return reportsStore.get(id);
+}
+
+export function getAllStoredReports(): EvaluationReport[] {
+  return Array.from(reportsStore.values()).sort(
+    (a, b) => new Date(b.runDate).getTime() - new Date(a.runDate).getTime()
+  );
+}
+
+export function getScreenshot(path: string): string | undefined {
+  return screenshotsStore.get(path);
 }
 
 export class DynamicFlowEvaluator {
@@ -22,24 +45,16 @@ export class DynamicFlowEvaluator {
   private config: FlowConfig;
   private flow: DynamicFlow;
   private evaluationId: string;
-  private screenshotsDir: string;
-  private reportsDir: string;
   private startTime: number = 0;
+  private useCloudBrowser: boolean = false;
 
   constructor(config: FlowConfig, flow: DynamicFlow) {
     this.config = config;
     this.flow = flow;
     this.evaluationId = uuidv4();
-
-    this.screenshotsDir = path.join(process.cwd(), "public", "screenshots", this.evaluationId);
-    this.reportsDir = path.join(process.cwd(), "public", "reports");
-
-    if (!fs.existsSync(this.screenshotsDir)) {
-      fs.mkdirSync(this.screenshotsDir, { recursive: true });
-    }
-    if (!fs.existsSync(this.reportsDir)) {
-      fs.mkdirSync(this.reportsDir, { recursive: true });
-    }
+    
+    // Use cloud browser if token is available or we're in serverless
+    this.useCloudBrowser = !!BROWSERLESS_TOKEN || isServerless;
   }
 
   async run(onProgress: StreamCallback): Promise<EvaluationReport> {
@@ -57,7 +72,22 @@ export class DynamicFlowEvaluator {
     });
 
     try {
-      this.browser = await chromium.launch({ headless: true });
+      // Connect to browser
+      if (this.useCloudBrowser && BROWSERLESS_TOKEN) {
+        // Connect to Browserless.io
+        const wsEndpoint = `${BROWSERLESS_URL}?token=${BROWSERLESS_TOKEN}`;
+        this.browser = await chromium.connect(wsEndpoint);
+        onProgress({ type: "info", message: "Connected to cloud browser" });
+      } else if (this.useCloudBrowser && !BROWSERLESS_TOKEN) {
+        // No token in serverless = can't run
+        throw new Error(
+          "Cloud browser token not configured. Please add BROWSERLESS_TOKEN to environment variables. " +
+          "Get a free token at https://browserless.io"
+        );
+      } else {
+        // Local browser
+        this.browser = await chromium.launch({ headless: true });
+      }
 
       const viewport = viewportSizes[this.config.viewport];
       const context = await this.browser.newContext({
@@ -122,7 +152,7 @@ export class DynamicFlowEvaluator {
             stepNumber,
             name: stepDef.name,
             url: this.page.url(),
-            screenshot: screenshotPath ? `/screenshots/${this.evaluationId}/step-${stepNumber}.png` : "",
+            screenshot: screenshotPath,
             pageTitle: pageData.title,
             h1: pageData.h1,
             formFields: pageData.formFields,
@@ -158,7 +188,7 @@ export class DynamicFlowEvaluator {
             stepNumber,
             name: stepDef.name,
             url: this.page.url(),
-            screenshot: screenshotPath ? `/screenshots/${this.evaluationId}/step-${stepNumber}.png` : "",
+            screenshot: screenshotPath,
             pageTitle: await this.page.title().catch(() => ""),
             formFields: [],
             buttons: [],
@@ -194,6 +224,36 @@ export class DynamicFlowEvaluator {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       onProgress({ type: "error", message: errorMessage });
+      
+      // Return a failed report
+      const report: EvaluationReport = {
+        id: this.evaluationId,
+        flowId: this.flow.id,
+        flowName: this.flow.name,
+        websiteName: this.flow.websiteName,
+        runDate: new Date().toISOString(),
+        totalSteps: this.flow.steps.length,
+        completedSteps: 0,
+        failedSteps: 1,
+        totalDuration: this.formatDuration(Date.now() - this.startTime),
+        viewport: this.config.viewport,
+        status: "failed",
+        steps: [{
+          stepNumber: 0,
+          name: "Initialization",
+          url: this.flow.websiteUrl,
+          screenshot: "",
+          pageTitle: "",
+          formFields: [],
+          buttons: [],
+          loadTime: "0s",
+          timestamp: new Date().toISOString(),
+          errors: [errorMessage],
+        }],
+      };
+      
+      reportsStore.set(this.evaluationId, report);
+      return report;
     } finally {
       if (this.browser) {
         await this.browser.close();
@@ -216,8 +276,26 @@ export class DynamicFlowEvaluator {
       steps,
     };
 
-    const reportPath = path.join(this.reportsDir, `${this.evaluationId}.json`);
-    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+    // Store report in memory for serverless, or write to file for local
+    reportsStore.set(this.evaluationId, report);
+    
+    // Also try to write to filesystem if available (local dev)
+    if (!isServerless) {
+      try {
+        const fs = await import("fs");
+        const path = await import("path");
+        const reportsDir = path.join(process.cwd(), "public", "reports");
+        if (!fs.existsSync(reportsDir)) {
+          fs.mkdirSync(reportsDir, { recursive: true });
+        }
+        fs.writeFileSync(
+          path.join(reportsDir, `${this.evaluationId}.json`),
+          JSON.stringify(report, null, 2)
+        );
+      } catch {
+        // Ignore filesystem errors in serverless
+      }
+    }
 
     onProgress({
       type: "complete",
@@ -232,7 +310,6 @@ export class DynamicFlowEvaluator {
   private async executeAction(action: StepAction): Promise<void> {
     if (!this.page) return;
 
-    // Get value - either direct or from testData
     let value = action.value || "";
     if (action.testDataKey && this.config.fillTestData && this.config.testData[action.testDataKey]) {
       value = this.config.testData[action.testDataKey];
@@ -249,7 +326,7 @@ export class DynamicFlowEvaluator {
         if (action.selector) {
           await this.page.waitForSelector(action.selector, { timeout: 10000 });
           await this.page.click(action.selector);
-          await this.page.waitForTimeout(1000); // Wait for navigation/updates
+          await this.page.waitForTimeout(1000);
         }
         break;
 
@@ -290,7 +367,6 @@ export class DynamicFlowEvaluator {
         break;
 
       case "screenshot":
-        // No action, just capture screenshot (handled in step processing)
         break;
     }
   }
@@ -330,15 +406,34 @@ export class DynamicFlowEvaluator {
   }
 
   private async takeScreenshot(page: Page, stepNumber: number): Promise<string> {
-    const filename = `step-${stepNumber}.png`;
-    const filepath = path.join(this.screenshotsDir, filename);
-
-    await page.screenshot({
-      path: filepath,
+    const screenshotBuffer = await page.screenshot({
       fullPage: this.config.screenshotMode === "fullpage",
     });
 
-    return filepath;
+    // Convert to base64 data URL
+    const base64 = screenshotBuffer.toString("base64");
+    const dataUrl = `data:image/png;base64,${base64}`;
+    
+    // Store in memory
+    const screenshotKey = `/screenshots/${this.evaluationId}/step-${stepNumber}.png`;
+    screenshotsStore.set(screenshotKey, dataUrl);
+
+    // Also try to save to filesystem if available
+    if (!isServerless) {
+      try {
+        const fs = await import("fs");
+        const path = await import("path");
+        const screenshotsDir = path.join(process.cwd(), "public", "screenshots", this.evaluationId);
+        if (!fs.existsSync(screenshotsDir)) {
+          fs.mkdirSync(screenshotsDir, { recursive: true });
+        }
+        fs.writeFileSync(path.join(screenshotsDir, `step-${stepNumber}.png`), screenshotBuffer);
+      } catch {
+        // Ignore filesystem errors
+      }
+    }
+
+    return screenshotKey;
   }
 
   private formatDuration(ms: number): string {
@@ -359,4 +454,3 @@ export async function runDynamicEvaluation(
   const evaluator = new DynamicFlowEvaluator(config, flow);
   return evaluator.run(onProgress);
 }
-

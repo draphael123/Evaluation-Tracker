@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as fs from "fs";
 import * as path from "path";
+import { getStoredReport } from "@/lib/dynamicEvaluator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,13 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // First check in-memory storage (for serverless)
+  const memoryReport = getStoredReport(id);
+  if (memoryReport) {
+    return NextResponse.json(memoryReport);
+  }
+
+  // Then check filesystem (for local development)
   const reportPath = path.join(process.cwd(), "public", "reports", `${id}.json`);
 
   if (!fs.existsSync(reportPath)) {
@@ -36,4 +44,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

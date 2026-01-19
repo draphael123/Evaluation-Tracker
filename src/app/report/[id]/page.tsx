@@ -2,7 +2,6 @@
 
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import Header from "@/components/Header";
 import {
   ArrowLeft,
@@ -43,8 +42,9 @@ interface StepData {
 
 interface ReportData {
   id: string;
-  flowType: string;
+  flowId: string;
   flowName: string;
+  websiteName?: string;
   runDate: string;
   totalSteps: number;
   completedSteps: number;
@@ -53,6 +53,73 @@ interface ReportData {
   viewport: string;
   status: "completed" | "failed" | "partial";
   steps: StepData[];
+}
+
+// Component to load and display screenshots
+function ScreenshotImage({ screenshotPath, alt }: { screenshotPath: string; alt: string }) {
+  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    const loadScreenshot = async () => {
+      if (!screenshotPath) {
+        setLoading(false);
+        return;
+      }
+
+      // Check if it's already a data URL
+      if (screenshotPath.startsWith("data:")) {
+        setImageSrc(screenshotPath);
+        setLoading(false);
+        return;
+      }
+
+      // Try to load from API
+      try {
+        const response = await fetch(`/api/screenshot?path=${encodeURIComponent(screenshotPath)}`);
+        if (response.ok) {
+          const data = await response.json();
+          setImageSrc(data.dataUrl);
+        } else {
+          // Fallback to direct path (for locally saved screenshots)
+          setImageSrc(screenshotPath);
+        }
+      } catch {
+        // Fallback to direct path
+        setImageSrc(screenshotPath);
+      }
+      setLoading(false);
+    };
+
+    loadScreenshot();
+  }, [screenshotPath]);
+
+  if (loading) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-[var(--background-subtle)]">
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--accent)]" />
+      </div>
+    );
+  }
+
+  if (!imageSrc || error) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center bg-[var(--background-subtle)]">
+        <ImageIcon className="w-12 h-12 text-[var(--foreground-dim)] mb-2" />
+        <p className="text-sm text-[var(--foreground-muted)]">No screenshot available</p>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={imageSrc}
+      alt={alt}
+      className="w-full h-full object-contain"
+      onError={() => setError(true)}
+    />
+  );
 }
 
 export default function ReportPage({ params }: { params: Promise<{ id: string }> }) {
@@ -280,22 +347,11 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
               {selectedStepData && (
                 <div className="glass rounded-2xl overflow-hidden">
                   {/* Screenshot */}
-                  <div className="relative aspect-video bg-[var(--background-subtle)] flex items-center justify-center">
-                    {selectedStepData.screenshot ? (
-                      <Image
-                        src={selectedStepData.screenshot}
-                        alt={`Step ${selectedStepData.stepNumber}: ${selectedStepData.name}`}
-                        fill
-                        className="object-contain"
-                      />
-                    ) : (
-                      <div className="text-center">
-                        <ImageIcon className="w-12 h-12 text-[var(--foreground-dim)] mx-auto mb-2" />
-                        <p className="text-sm text-[var(--foreground-muted)]">
-                          No screenshot available
-                        </p>
-                      </div>
-                    )}
+                  <div className="relative aspect-video bg-[var(--background-subtle)]">
+                    <ScreenshotImage
+                      screenshotPath={selectedStepData.screenshot}
+                      alt={`Step ${selectedStepData.stepNumber}: ${selectedStepData.name}`}
+                    />
                   </div>
 
                   {/* Step Info */}
@@ -453,4 +509,3 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
     </div>
   );
 }
-
